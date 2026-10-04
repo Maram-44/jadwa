@@ -1,0 +1,24 @@
+{
+  "name": "jadwa-react",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 4173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "test": "node --test tests/*.test.js",
+    "sync:room": "node scripts/sync-room.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.2",
+    "@vitejs/plugin-react": "6.1.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

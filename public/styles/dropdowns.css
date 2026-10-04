@@ -1,0 +1,32 @@
+/* Shared control chrome and floating options across all dashboard pages. */
+select[hidden]{display:none!important}
+.jd-select{display:inline-flex;align-items:center;justify-content:space-between;gap:14px;min-width:125px;max-width:100%;min-height:42px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:#485770;font:inherit;font-size:14px;text-align:right;line-height:1.65;transition:border-color .16s,background .16s,box-shadow .16s;cursor:pointer}
+.jd-select:hover{border-color:#bfd0ef;background:#fafcff}
+.jd-select[aria-expanded=true]{border-color:#8bb0f6;box-shadow:0 0 0 3px #2563eb0d;color:var(--blue)}
+.jd-select:focus-visible{outline:3px solid #91b5ff;outline-offset:3px}
+.jd-select:active{transform:none}
+.jd-select:disabled{opacity:.5;cursor:not-allowed}
+.jd-select-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.jd-select-arrow{width:16px;height:16px;color:#8796ab;stroke-width:1.8;transition:transform .18s,color .18s}
+.jd-select[aria-expanded=true] .jd-select-arrow{transform:rotate(180deg);color:var(--blue)}
+.period-select .jd-select{min-width:145px;min-height:30px;padding:0 0 0 1px;border:0;border-radius:4px;background:transparent;font-size:13px;box-shadow:none}
+.period-select:has(.jd-select){border-radius:10px;transition:border-color .16s,box-shadow .16s}
+.period-select:has(.jd-select):hover{border-color:#bfd0ef}
+.period-select:has(.jd-select[aria-expanded=true]){border-color:#8bb0f6;box-shadow:0 0 0 3px #2563eb0d}
+.period-select:has(.jd-select)>.select-chevron{display:none}
+.catalog-filter .jd-select{max-width:185px}
+.jd-select-menu{position:fixed;z-index:100;box-sizing:border-box;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent;padding:6px;background:#fff;border:1px solid #e3e9f3;border-radius:12px;box-shadow:0 12px 36px #0f172a12,0 3px 8px #0f172a06;font-family:inherit;font-size:14px;line-height:1.7;animation:jd-menu-in .14s ease-out}
+.jd-select-menu[hidden]{display:none}
+.jd-select-option{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 11px;min-height:42px;border-radius:7px;color:#485770;cursor:pointer;transition:background .12s,color .12s;white-space:normal}
+.jd-select-option[hidden]{display:none}
+.jd-select-option svg{height:16px;width:16px;opacity:0;stroke-width:2}
+.jd-select-option[aria-selected=true]{background:#edf3ff;color:var(--blue);font-weight:500}
+.jd-select-option[aria-selected=true] svg{opacity:1}
+.jd-select-option.is-active{background:#f1f5fc;color:var(--blue);box-shadow:inset 0 0 0 1px #dde8fc}
+.jd-select-option[aria-selected=true].is-active{background:#e8f0ff}
+.jd-select-option[aria-disabled=true]{opacity:.45;cursor:not-allowed}
+@keyframes jd-menu-in{from{opacity:0;transform:scale(.98) translateY(-3px)}to{opacity:1;transform:none}}
+@media(max-width:600px){.catalog-filter .jd-select{min-width:0;max-width:180px;flex:1}.expense-list-section .catalog-filter .jd-select{width:100%;max-width:none}.jd-select{gap:8px}.period-select .jd-select{min-width:136px}}
+@media(prefers-reduced-motion:reduce){.jd-select,.jd-select-arrow,.jd-select-option,.period-select:has(.jd-select){transition:none}.jd-select-menu{animation:none}}
+
+.jd-select-menu[popover]{margin:0;inset:auto}
