@@ -25,7 +25,7 @@ export function toProfileDTO(row) {
   if (!row) return null;
   const fullName = row.full_name ? row.full_name.trim() : "";
   const email = row.email ? row.email.trim() : "";
-  const avatarInitial = computeAvatarInitial(fullName, email) || (email ? email.charAt(0).toUpperCase() : "");
+  const avatarInitial = row.avatar_initial || computeAvatarInitial(fullName, email) || (email ? email.charAt(0).toUpperCase() : "");
 
   return {
     id: row.id,

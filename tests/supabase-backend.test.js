@@ -202,3 +202,60 @@ test("Period DTO properly converts object changes with {label, percent, directio
   assert.equal(typeof periodWithObjChanges.changes[0], "string");
 });
 
+test("Real Supabase authentication flow: guest login, normal login, profile loading, session persistence, and logout", async () => {
+  if (!globalThis.localStorage) {
+    const store = new Map();
+    globalThis.localStorage = {
+      getItem: (k) => store.get(k) || null,
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+      clear: () => store.clear(),
+    };
+  }
+  if (!globalThis.sessionStorage) {
+    const store = new Map();
+    globalThis.sessionStorage = {
+      getItem: (k) => store.get(k) || null,
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+      clear: () => store.clear(),
+    };
+  }
+
+  const { authService } = await import("../src/features/auth/services/authService.js");
+  const { DEMO_CREDENTIALS } = await import("../src/shared/lib/supabase.js");
+
+  // 1. Guest login performs a real Supabase signInWithPassword using demo credentials
+  const guestRes = await authService.signInAsGuest();
+  assert.equal(guestRes.error, null);
+  assert.ok(guestRes.user, "Guest login should return an authenticated user");
+  assert.equal(guestRes.user.email, DEMO_CREDENTIALS.email);
+  assert.notEqual(guestRes.user.id, "guest-judge-session", "Should not use fake hardcoded guest user ID");
+  assert.equal(guestRes.user.isGuest, false, "Authenticated Supabase user is not a fake guest");
+  assert.ok(guestRes.user.profile, "User profile should be loaded from Supabase");
+  assert.equal(guestRes.user.profile.fullName, "الشيماء", "Profile full name should be loaded from profiles table");
+  assert.equal(guestRes.user.profile.role, "مالكة المنشأة");
+
+  // 2. Simulating page refresh: getCurrentUser preserves authenticated session
+  const currentUser = await authService.getCurrentUser();
+  assert.ok(currentUser, "Session must be preserved after refresh");
+  assert.equal(currentUser.id, guestRes.user.id);
+  assert.equal(currentUser.email, DEMO_CREDENTIALS.email);
+  assert.equal(currentUser.profile.fullName, "الشيماء");
+
+  // 3. Normal login with credentials also works
+  const loginRes = await authService.signIn({
+    email: DEMO_CREDENTIALS.email,
+    password: DEMO_CREDENTIALS.password,
+  });
+  assert.equal(loginRes.error, null);
+  assert.ok(loginRes.user);
+  assert.equal(loginRes.user.id, guestRes.user.id);
+
+  // 4. Logout works and cleans the session
+  await authService.signOut();
+  const afterSignOut = await authService.getCurrentUser();
+  assert.equal(afterSignOut, null, "User should be null after signing out");
+});
+
+

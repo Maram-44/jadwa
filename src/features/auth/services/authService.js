@@ -95,7 +95,11 @@ export const authService = {
             dto.fullName = emailFallbackName || "مستخدم";
           }
         }
-        dto.avatarInitial = computeAvatarInitial(dto.fullName, authUser?.email || dto.email);
+        if (data.avatar_initial) {
+          dto.avatarInitial = data.avatar_initial;
+        } else {
+          dto.avatarInitial = computeAvatarInitial(dto.fullName, authUser?.email || dto.email);
+        }
         return dto;
       }
 
@@ -252,28 +256,41 @@ export const authService = {
   },
 
   /**
-   * Continue as Guest / Demo Account for hackathon judges
+   * Continue as Guest / Demo Account: performs a real Supabase signInWithPassword
+   * using the demo credentials from .env
    */
   async signInAsGuest() {
-    // Explicit guest demo login requested by user
-    const guestUser = {
-      id: "guest-judge-session",
-      email: "demo@jadwa.app",
-      profile: {
-        id: "guest-judge-session",
-        fullName: "الشيماء",
-        businessName: "منشأتي",
-        businessType: "مقهى ومطعم",
-        role: "مالكة المنشأة",
-        avatarInitial: "ش",
-      },
-      isGuest: true,
+    const creds = {
+      email: DEMO_CREDENTIALS.email,
+      password: DEMO_CREDENTIALS.password,
     };
-    try {
-      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(guestUser));
-    } catch {}
 
-    return { user: guestUser, error: null };
+    let res = await this.signIn(creds);
+
+    // If login failed in Supabase due to unseeded user in fresh environment, attempt auto-signup & seed
+    if (res.error && isSupabaseConfigured && supabase) {
+      try {
+        await supabase.auth.signUp({
+          email: creds.email,
+          password: creds.password,
+          options: {
+            data: {
+              full_name: "الشيماء",
+              business_name: "منشأتي",
+              avatar_initial: "ش",
+            },
+          },
+        });
+        res = await this.signIn(creds);
+        if (res.user?.id) {
+          await supabase.rpc("seed_jadwa_user_data", { target_user_id: res.user.id }).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("[Jadwa Auth] Auto-provision fallback error:", err);
+      }
+    }
+
+    return res;
   },
 
   /**

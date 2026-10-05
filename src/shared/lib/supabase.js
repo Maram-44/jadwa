@@ -1,7 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
+const getEnv = (key) => {
+  if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env[key]) {
+    return import.meta.env[key];
+  }
+  if (typeof process !== "undefined" && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  return "";
+};
+
+const supabaseUrl = getEnv("VITE_SUPABASE_URL");
+const supabaseAnonKey = getEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl &&
@@ -21,6 +31,6 @@ export const supabase = isSupabaseConfigured
   : null;
 
 export const DEMO_CREDENTIALS = {
-  email: import.meta.env.VITE_DEMO_USER_EMAIL || "demo@jadwa.app",
-  password: import.meta.env.VITE_DEMO_USER_PASSWORD || "JadwaDemo2026!",
+  email: getEnv("VITE_DEMO_USER_EMAIL") || "demo@jadwa.app",
+  password: getEnv("VITE_DEMO_USER_PASSWORD") || "JadwaDemo2026!",
 };
