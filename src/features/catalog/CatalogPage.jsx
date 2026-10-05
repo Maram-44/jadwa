@@ -3,15 +3,19 @@ import View from "./components/ProductsView.jsx";
 import CatalogDetails, { labels } from "./components/CatalogDetails.jsx";
 import { months, opportunities } from "../../shared/data/demo.js";
 import {
-  catalogProducts,
-  catalogStock,
-  catalogRows,
+  catalogProducts as defaultProducts,
+  catalogStock as defaultStock,
+  productMetrics,
+  stockMetrics,
+  normalizeSearch,
   marginTarget,
 } from "../../shared/data/catalog.js";
-import { useQuery, useLoading, useWorkspace } from "../../shared/lib/hooks.js";
+import { useQuery, useWorkspace } from "../../shared/lib/hooks.js";
 import { Summary, Money, number, Icon } from "../../shared/ui/primitives.jsx";
 import DataTable from "../../shared/ui/DataTable.jsx";
 import InfoContent from "../../shared/ui/InfoContent.jsx";
+import { catalogService } from "./services/catalogService.js";
+
 export default function CatalogPage() {
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
@@ -21,24 +25,72 @@ export default function CatalogPage() {
     related = ["0", "1"].includes(params.get("opportunity"))
       ? Number(params.get("opportunity"))
       : null;
+
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("all"),
     [sortKey, setSort] = useState(null),
     [direction, setDirection] = useState("asc"),
     [item, setItem] = useState(null);
-  const loading = useLoading(month + tab, 500),
-    w = useWorkspace(month, "catalog"),
+
+  const [productsList, setProductsList] = useState(defaultProducts);
+  const [stockList, setStockList] = useState(defaultStock);
+  const [loading, setLoading] = useState(true);
+
+  const w = useWorkspace(month, "catalog"),
     productTab = useRef(),
     stockTab = useRef();
-  const source = tab === "products" ? catalogProducts : catalogStock,
-    full = catalogRows(tab, month),
-    rows = catalogRows(tab, month, {
-      query,
-      status,
-      related,
-      sortKey,
-      direction,
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+
+    Promise.all([
+      catalogService.getProducts(month),
+      catalogService.getInventory(month),
+    ]).then(([prods, inv]) => {
+      if (!active) return;
+      if (prods && prods.length > 0) setProductsList(prods);
+      if (inv && inv.length > 0) setStockList(inv);
+      setLoading(false);
+    }).catch(() => {
+      if (active) setLoading(false);
     });
+
+    return () => {
+      active = false;
+    };
+  }, [month]);
+
+  const source = tab === "products" ? productsList : stockList;
+  const metricsFn = tab === "products" ? productMetrics : stockMetrics;
+  const priority =
+    tab === "products"
+      ? { loss: 0, low: 1, missing: 2, normal: 3 }
+      : { low: 0, waste: 1, excess: 2, slow: 3, normal: 4 };
+
+  const full = source.map((p) => ({ ...p, ...metricsFn(p, month) }));
+
+  const rows = full
+    .filter(
+      (p) =>
+        (!query ||
+          normalizeSearch(p.name + " " + p.code).includes(
+            normalizeSearch(query),
+          )) &&
+        (status === "all" || p.status === status) &&
+        (related === null || p.opportunities.includes(related)),
+    )
+    .sort((a, b) => {
+      if (!sortKey)
+        return (
+          priority[a.status] - priority[b.status] ||
+          a.name.localeCompare(b.name, "ar")
+        );
+      if (a[sortKey] === null) return b[sortKey] === null ? 0 : 1;
+      if (b[sortKey] === null) return -1;
+      return (a[sortKey] - b[sortKey]) * (direction === "asc" ? 1 : -1);
+    });
+
   const headers =
     tab === "products"
       ? [
@@ -58,10 +110,12 @@ export default function CatalogPage() {
           ["تكلفة الهدر", "wasteCost"],
           ["الحالة", null],
         ];
+
   useEffect(() => {
     if (!loading && params.get("item"))
       setItem(source.find((x) => x.id === params.get("item")) || null);
-  }, [loading]);
+  }, [loading, source]);
+
   const reset = () => {
     setQuery("");
     setStatus("all");
@@ -69,6 +123,7 @@ export default function CatalogPage() {
     setDirection("asc");
     update({ opportunity: null, item: null });
   };
+
   const switchTab = (next, focus = false) => {
     if (next !== tab) {
       setQuery("");
@@ -79,16 +134,19 @@ export default function CatalogPage() {
     }
     if (focus) (next === "products" ? productTab : stockTab).current?.focus();
   };
+
   const sort = (k) => {
     setDirection(sortKey === k && direction === "asc" ? "desc" : "asc");
     setSort(k);
   };
+
   const sales = full.reduce((s, p) => s + (p.sales || 0), 0),
     costs = full.reduce((s, p) => s + (p.cost ?? 0), 0),
     margin =
       sales && full.every((p) => p.cost !== null)
         ? ((sales - costs) / sales) * 100
         : null;
+
   const summaries =
     tab === "products"
       ? [
@@ -131,6 +189,7 @@ export default function CatalogPage() {
             "زيادة، قرب نفاد، هدر أو حركة بطيئة",
           ],
         ];
+
   const cells = rows.map((p) => ({
     id: p.id,
     cells: [
@@ -197,6 +256,7 @@ export default function CatalogPage() {
       </span>,
     ],
   }));
+
   const slots = {
     "catalog-summary": summaries.map(([icon, title, value, note], i) => (
       <Summary
@@ -284,6 +344,7 @@ export default function CatalogPage() {
       ? "جاري تحميل بيانات " + (tab === "products" ? "المنتجات" : "المخزون")
       : number(rows.length) + " نتائج",
   };
+
   return (
     <View
       active="catalog"

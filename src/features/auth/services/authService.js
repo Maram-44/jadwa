@@ -1,0 +1,312 @@
+import { supabase, isSupabaseConfigured, DEMO_CREDENTIALS } from "../../../shared/lib/supabase.js";
+import { toProfileDTO, computeAvatarInitial } from "../../../shared/types/dto.js";
+import { JadwaSession } from "../../../shared/lib/session.js";
+
+const LOCAL_SESSION_KEY = "jadwa_auth_user";
+
+export const authService = {
+  /**
+   * Get the current active user from Supabase or local guest storage
+   */
+  async getCurrentUser() {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (user && !error) {
+          // A real authenticated user exists: clean any leftover guest session
+          try {
+            localStorage.removeItem(LOCAL_SESSION_KEY);
+          } catch {}
+
+          const isDemoEmail = user.email === DEMO_CREDENTIALS.email;
+          const profile = await this.getProfile(user.id, user);
+          return {
+            id: user.id,
+            email: user.email,
+            profile,
+            isGuest: isDemoEmail,
+          };
+        }
+      } catch (e) {
+        console.warn("[Jadwa Auth] Error fetching Supabase user, checking local session:", e);
+      }
+    }
+
+    // Only allow guest session if explicitly created via "الدخول كزائر"
+    try {
+      const stored = localStorage.getItem(LOCAL_SESSION_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.isGuest) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+
+    return null;
+  },
+
+  /**
+   * Get user profile by user UUID, falling back to authenticated user metadata
+   */
+  async getProfile(userId, fallbackUser = null) {
+    let authUser = fallbackUser;
+    if (!authUser && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        authUser = data?.user || null;
+      } catch {}
+    }
+
+    const isDemoEmail = authUser?.email === DEMO_CREDENTIALS.email;
+    const meta = authUser?.user_metadata || {};
+    const fallbackName = meta.full_name || (authUser?.email ? authUser.email.split("@")[0] : "");
+    const fallbackInitial = computeAvatarInitial(fallbackName, authUser?.email);
+
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        id: userId,
+        email: authUser?.email || "",
+        fullName: fallbackName || (isDemoEmail ? "الشيماء" : "مستخدم جديد"),
+        businessName: meta.business_name || "منشأتي",
+        businessType: "مقهى ومطعم",
+        role: "مالكة المنشأة",
+        avatarInitial: isDemoEmail && !fallbackName ? "ش" : fallbackInitial,
+      };
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .single();
+
+      if (!error && data) {
+        const dto = toProfileDTO(data);
+        if ((!dto.fullName || dto.fullName === "مستخدم جديد") && fallbackName) {
+          dto.fullName = fallbackName;
+          dto.avatarInitial = fallbackInitial;
+        }
+        return dto;
+      }
+
+      // If profiles row not created yet, create it from auth metadata
+      const profileToCreate = {
+        id: userId,
+        email: authUser?.email || "",
+        full_name: fallbackName || (isDemoEmail ? "الشيماء" : "مستخدم جديد"),
+        business_name: meta.business_name || "منشأتي",
+        business_type: "مقهى ومطعم",
+        role: "مالكة المنشأة",
+        avatar_initial: isDemoEmail && !fallbackName ? "ش" : fallbackInitial,
+      };
+
+      await supabase
+        .from("profiles")
+        .upsert(profileToCreate)
+        .catch(() => {});
+
+      return toProfileDTO(profileToCreate);
+    } catch {
+      return {
+        id: userId,
+        email: authUser?.email || "",
+        fullName: fallbackName || (isDemoEmail ? "الشيماء" : "مستخدم جديد"),
+        businessName: meta.business_name || "منشأتي",
+        businessType: "مقهى ومطعم",
+        role: "مالكة المنشأة",
+        avatarInitial: isDemoEmail && !fallbackName ? "ش" : fallbackInitial,
+      };
+    }
+  },
+
+  /**
+   * Register a new user
+   */
+  async signUp({ email, password, fullName }) {
+    if (!isSupabaseConfigured || !supabase) {
+      const avatarInitial = computeAvatarInitial(fullName, email);
+      const mockUser = {
+        id: "usr-" + Date.now(),
+        email,
+        profile: {
+          id: "usr-" + Date.now(),
+          fullName: fullName || email.split("@")[0] || "مستخدم جديد",
+          businessName: "منشأتي",
+          businessType: "مقهى ومطعم",
+          role: "مالكة المنشأة",
+          avatarInitial,
+        },
+        isGuest: false,
+      };
+      return { user: mockUser, error: null };
+    }
+
+    try {
+      const avatarInitial = computeAvatarInitial(fullName, email);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            business_name: "منشأتي",
+            avatar_initial: avatarInitial,
+          },
+        },
+      });
+
+      if (error) {
+        return { user: null, error: error.message };
+      }
+
+      const user = data.user;
+      if (user) {
+        await supabase
+          .from("profiles")
+          .upsert({
+            id: user.id,
+            email: user.email,
+            full_name: fullName,
+            business_name: "منشأتي",
+            business_type: "مقهى ومطعم",
+            role: "مالكة المنشأة",
+            avatar_initial: avatarInitial,
+          })
+          .catch(() => {});
+      }
+
+      return { user, error: null };
+    } catch (err) {
+      return { user: null, error: err.message || "حدث خطأ أثناء إنشاء الحساب." };
+    }
+  },
+
+  /**
+   * Sign in with email and password
+   */
+  async signIn({ email, password }) {
+    // Clear any previous guest/demo session before real login
+    try {
+      localStorage.removeItem(LOCAL_SESSION_KEY);
+      sessionStorage.clear();
+      JadwaSession.clear();
+    } catch {}
+
+    if (!isSupabaseConfigured || !supabase) {
+      const avatarInitial = computeAvatarInitial(email.split("@")[0], email);
+      const mockUser = {
+        id: "usr-" + Date.now(),
+        email,
+        profile: {
+          id: "usr-" + Date.now(),
+          fullName: email.split("@")[0] || "مستخدم جديد",
+          businessName: "منشأتي",
+          businessType: "مقهى ومطعم",
+          role: "مالكة المنشأة",
+          avatarInitial,
+        },
+        isGuest: false,
+      };
+      return { user: mockUser, error: null };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        return { user: null, error: error.message };
+      }
+
+      const profile = await this.getProfile(data.user.id, data.user);
+      const isDemo = data.user.email === DEMO_CREDENTIALS.email;
+      return {
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+          profile,
+          isGuest: isDemo,
+        },
+        error: null,
+      };
+    } catch (err) {
+      return { user: null, error: err.message || "تعذر تسجيل الدخول." };
+    }
+  },
+
+  /**
+   * Continue as Guest / Demo Account for hackathon judges
+   */
+  async signInAsGuest() {
+    // Explicit guest demo login requested by user
+    const guestUser = {
+      id: "guest-judge-session",
+      email: "demo@jadwa.app",
+      profile: {
+        id: "guest-judge-session",
+        fullName: "الشيماء",
+        businessName: "منشأتي",
+        businessType: "مقهى ومطعم",
+        role: "مالكة المنشأة",
+        avatarInitial: "ش",
+      },
+      isGuest: true,
+    };
+    try {
+      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(guestUser));
+    } catch {}
+
+    return { user: guestUser, error: null };
+  },
+
+  /**
+   * Password reset flow
+   */
+  async resetPassword(email) {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: true, message: "تم إرسال رابط استعادة كلمة المرور تجريبيًا." };
+    }
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + "/login.html",
+      });
+
+      if (error) {
+        return { success: false, message: error.message };
+      }
+
+      return { success: true, message: "تم إرسال رابط استعادة كلمة المرور إلى بريدك." };
+    } catch (err) {
+      return { success: false, message: err.message || "تعذر إرسال رابط الاستعادة." };
+    }
+  },
+
+  /**
+   * Sign out
+   */
+  async signOut() {
+    try {
+      localStorage.removeItem(LOCAL_SESSION_KEY);
+      localStorage.removeItem("jadwa_opportunity_states_v1");
+      sessionStorage.clear();
+      JadwaSession.clear();
+    } catch {}
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn("[Jadwa Auth] Error signing out:", err);
+      }
+    }
+
+    return { success: true };
+  },
+};

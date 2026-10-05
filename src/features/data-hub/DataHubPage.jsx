@@ -11,6 +11,8 @@ import FileDetails, {
   FileSummary,
 } from "./components/FileDetails.jsx";
 import { JadwaSession } from "../../shared/lib/session.js";
+import { dataHubService } from "./services/dataHubService.js";
+import { csvFileMetaSchema } from "./schemas/dataHubSchemas.js";
 import {
   useQuery,
   useLoading,
@@ -58,6 +60,13 @@ export default function DataHubPage() {
     },
     [],
   );
+  useEffect(() => {
+    dataHubService.getFiles().then((loaded) => {
+      if (loaded && loaded.length > 0) {
+        setFiles(loaded);
+      }
+    }).catch(() => {});
+  }, []);
   useEffect(() => {
     if (error) errorRef.current?.scrollIntoView({ block: "nearest" });
   }, [error]);
@@ -109,12 +118,10 @@ export default function DataHubPage() {
     setReading(false);
     setPicked("ملف واحد في كل مرة");
     if (!file) return;
-    if (!/\.csv$/i.test(file.name)) {
-      setError("الصيغة غير مدعومة. صدّر الملف بصيغة CSV UTF-8 ثم أعد اختياره.");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setError("حجم الملف يتجاوز ٥ ميجابايت. قسّمه إلى ملف أصغر.");
+    const metaCheck = csvFileMetaSchema.safeParse({ name: file.name, size: file.size });
+    if (!metaCheck.success) {
+      const issues = metaCheck.error.issues || metaCheck.error.errors || [];
+      setError(issues[0]?.message || "ملف غير صالح.");
       return;
     }
     setPicked(file.name);
@@ -233,6 +240,7 @@ export default function DataHubPage() {
             );
         }
         JadwaSession.save(nextFiles);
+        dataHubService.saveFile(f).catch(() => {});
         setFiles(nextFiles);
         setPeriod(f.result.period);
         closeImport();

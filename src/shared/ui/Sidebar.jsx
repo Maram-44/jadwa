@@ -1,5 +1,13 @@
 import { Riyal } from "./primitives.jsx";
+import { useAuth } from "../lib/authContext.jsx";
 export default function Sidebar({ active, bindings = {} }) {
+  const { user } = useAuth();
+  const profile = user?.profile || {};
+  const businessName = profile.businessName || "منشأتي";
+  const fullName = profile.fullName || "الشيماء";
+  const role = profile.role || "مالكة المنشأة";
+  const avatarInitial = profile.avatarInitial || (fullName ? fullName.charAt(0) : "ش");
+  const workspaceInitial = businessName.charAt(0) || "م";
   bindings = { ...bindings };
   for (const [key, name] of Object.entries({
     "data-action:opportunities": "opportunities",
@@ -39,10 +47,10 @@ export default function Sidebar({ active, bindings = {} }) {
           </a>
           <div className={"workspace"} {...bindings[".workspace"]}>
             <span className={"workspace-icon"} {...bindings[".workspace-icon"]}>
-              {"م"}
+              {workspaceInitial}
             </span>
             <span>
-              <b>{"منشأتي"}</b>
+              <b>{businessName}</b>
               <small>{"مساحة العمل التجريبية"}</small>
             </span>
             <span
@@ -129,11 +137,11 @@ export default function Sidebar({ active, bindings = {} }) {
             </div>
             <div className={"profile"} {...bindings[".profile"]}>
               <span className={"avatar"} {...bindings[".avatar"]}>
-                {"ش"}
+                {avatarInitial}
               </span>
               <div>
-                <b>{"الشيماء"}</b>
-                <small>{"مالكة المنشأة"}</small>
+                <b>{fullName}</b>
+                <small>{role}</small>
               </div>
               <span className={"profile-mark"} {...bindings[".profile-mark"]}>
                 {"جدوى"}

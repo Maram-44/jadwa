@@ -39,8 +39,13 @@ export const JadwaSession = (() => {
       );
     }
   }
+  function clear() {
+    try {
+      sessionStorage.removeItem(key);
+    } catch {}
+  }
   const forPeriod = (period) =>
     files().filter((f) => f.result.period === period);
   const periodFor = (month) => (month === "aug" ? "2026-08" : "2026-09");
-  return { files, save, forPeriod, periodFor };
+  return { files, save, clear, forPeriod, periodFor };
 })();

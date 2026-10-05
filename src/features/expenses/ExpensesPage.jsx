@@ -3,44 +3,115 @@ import View from "./components/ExpensesView.jsx";
 import ExpenseDetails, { categoryName } from "./components/ExpenseDetails.jsx";
 import { months } from "../../shared/data/demo.js";
 import {
-  expenseRows,
-  expenseSummary,
   expenseCategories,
+  expenseComparison,
   expenseReconciliation,
+  expenseRecords as defaultRecords,
 } from "../../shared/data/expenses.js";
-import { useQuery, useLoading, useWorkspace } from "../../shared/lib/hooks.js";
+import { normalizeSearch } from "../../shared/data/catalog.js";
+import { useQuery, useWorkspace } from "../../shared/lib/hooks.js";
 import { Summary, Money, number, Icon } from "../../shared/ui/primitives.jsx";
 import DataTable from "../../shared/ui/DataTable.jsx";
 import InfoContent from "../../shared/ui/InfoContent.jsx";
+import { expensesService } from "./services/expensesService.js";
+
 export default function ExpensesPage() {
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
       ? params.get("month")
       : "sep",
     related = params.get("opportunity") === "2",
-    w = useWorkspace(month, "expenses"),
-    loading = useLoading(month, 500);
-  const [query, setQuery] = useState(""),
-    [category, setCategory] = useState("all"),
-    [recurrence, setRecurrence] = useState("all"),
-    [sort, setSort] = useState("date-desc"),
-    [item, setItem] = useState(null);
-  const list = expenseRows(month, {
-      query,
-      category,
-      recurrence,
-      sort,
-      related,
-    }),
-    all = expenseRows(month),
-    s = expenseSummary(month),
-    c = s.comparison,
-    m = months[month],
-    max = Math.max(1, ...s.categories.map((c) => c.total));
+    w = useWorkspace(month, "expenses");
+
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  const [recurrence, setRecurrence] = useState("all");
+  const [sort, setSort] = useState("date-desc");
+  const [item, setItem] = useState(null);
+  const [records, setRecords] = useState(() =>
+    defaultRecords.map((r) => ({
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      vendor: r.vendor,
+      recurring: r.recurring,
+      day: r.day,
+      amount: r[month] ?? 0,
+      date: `2026-${month === "aug" ? "08" : "09"}-${String(r.day).padStart(2, "0")}`,
+      opportunity: r.opportunity,
+      renewDay: r.renewDay || null,
+      description: r.description,
+    })),
+  );
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+
+    expensesService.getExpenseRecords(month).then((data) => {
+      if (!active) return;
+      if (data && data.length > 0) {
+        setRecords(data);
+      }
+      setLoading(false);
+    }).catch(() => {
+      if (active) setLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [month]);
+
+  const q = normalizeSearch(query);
+  const all = records.map((r, i) => ({
+    ...r,
+    category: expenseCategories.some((c) => c.id === r.category)
+      ? r.category
+      : "unclassified",
+    sourceRow: i + 2,
+  }));
+
+  const list = all
+    .filter(
+      (r) =>
+        (!q || normalizeSearch(r.name + " " + r.vendor).includes(q)) &&
+        (category === "all" || r.category === category) &&
+        (recurrence === "all" ||
+          r.recurring === (recurrence === "recurring")) &&
+        (!related || r.opportunity === 2),
+    )
+    .sort((a, b) =>
+      sort.startsWith("amount")
+        ? (a.amount - b.amount) * (sort.endsWith("asc") ? 1 : -1)
+        : a.date.localeCompare(b.date) * (sort.endsWith("asc") ? 1 : -1),
+    );
+
+  const total = all.reduce((s, r) => s + r.amount, 0);
+  const recurringTotal = all
+    .filter((r) => r.recurring)
+    .reduce((s, r) => s + r.amount, 0);
+  const recurringCount = all.filter((r) => r.recurring).length;
+
+  const categoriesTotal = expenseCategories.map((c) => ({
+    ...c,
+    total: all
+      .filter((r) => r.category === c.id)
+      .reduce((s, r) => s + r.amount, 0),
+  }));
+
+  const m = months[month];
+  // August comparison
+  const augTotal = defaultRecords.reduce((s, r) => s + (r.aug || 0), 0);
+  const c = month === "sep" ? expenseComparison(total, augTotal) : null;
+  const max = Math.max(1, ...categoriesTotal.map((c) => c.total));
+
   useEffect(() => {
     if (!loading && params.get("item"))
       setItem(all.find((r) => r.id === params.get("item")) || null);
-  }, [loading]);
+  }, [loading, all]);
+
   const reset = () => {
     setQuery("");
     setCategory("all");
@@ -48,6 +119,7 @@ export default function ExpensesPage() {
     setSort("date-desc");
     update({ opportunity: null, item: null });
   };
+
   const breakdown = () => {
     const r = expenseReconciliation(month);
     w.setInfo({
@@ -62,7 +134,7 @@ export default function ExpensesPage() {
               {[
                 ["تكلفة الوحدات المباعة", r.products],
                 ["الهدر المسجل منفصلًا", r.waste],
-                ["المصروفات التشغيلية", r.operating],
+                ["المصروفات التشغيلية", total || r.operating],
               ].map(([label, n]) => (
                 <tr key={label}>
                   <td>{label}</td>
@@ -76,7 +148,7 @@ export default function ExpensesPage() {
           <div className="reconcile-total">
             <span>إجمالي التكاليف</span>
             <strong>
-              <Money value={r.total} />
+              <Money value={r.products + r.waste + (total || r.operating)} />
             </strong>
           </div>
           <p className="dialog-description">
@@ -87,6 +159,7 @@ export default function ExpensesPage() {
       ),
     });
   };
+
   const headers = [
       ["البند", null],
       ["التصنيف", null],
@@ -133,6 +206,7 @@ export default function ExpensesPage() {
         </span>,
       ],
     }));
+
   const change = c
     ? c.difference === 0
       ? "لم يتغير الإجمالي"
@@ -141,13 +215,14 @@ export default function ExpensesPage() {
         (c.percentage === null ? "" : number(Math.abs(c.percentage)) + "٪") +
         " عن أغسطس"
     : "لا تتوفر بيانات يوليو للمقارنة";
+
   const slots = {
     "expense-summary": (
       <>
         <Summary
           icon="wallet"
           title="المصروفات التشغيلية"
-          value={<Money value={s.total} />}
+          value={<Money value={total} />}
           note={m.name + " ٢٠٢٦"}
           featured
           loading={loading}
@@ -162,15 +237,15 @@ export default function ExpensesPage() {
         <Summary
           icon="calendar"
           title="مصروفات متكررة"
-          value={<Money value={s.recurringTotal} />}
-          note={number(s.recurringCount) + " بنود شهرية في الفترة"}
+          value={<Money value={recurringTotal} />}
+          note={number(recurringCount) + " بنود شهرية في الفترة"}
           loading={loading}
         />
       </>
     ),
     "distribution-period": m.name + " ٢٠٢٦",
     "period-footer": "نسخة تجريبية · " + m.name + " ٢٠٢٦",
-    "expense-bars": s.categories
+    "expense-bars": categoriesTotal
       .filter((c) => c.total > 0)
       .map((c) => (
         <button
@@ -195,7 +270,7 @@ export default function ExpensesPage() {
             <Money value={c.total} />
           </span>
           <span className="distribution-share">
-            {number(s.total ? (c.total / s.total) * 100 : 0)}٪
+            {number(total ? (c.total / total) * 100 : 0)}٪
           </span>
         </button>
       )),
@@ -254,6 +329,7 @@ export default function ExpensesPage() {
       ? "جاري تحميل مصروفات " + m.name
       : number(list.length) + " نتائج",
   };
+
   return (
     <View
       active="expenses"

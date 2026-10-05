@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import View from "./components/DashboardView.jsx";
-import { months, opportunities } from "../../shared/data/demo.js";
-import { useQuery, useLoading, useWorkspace } from "../../shared/lib/hooks.js";
+import { months, opportunities as defaultOpportunities } from "../../shared/data/demo.js";
+import { useQuery, useWorkspace } from "../../shared/lib/hooks.js";
 import {
   number,
   Money,
@@ -10,6 +10,9 @@ import {
   Skeleton,
 } from "../../shared/ui/primitives.jsx";
 import { JadwaSession } from "../../shared/lib/session.js";
+import { dashboardService } from "./services/dashboardService.js";
+import { opportunityService } from "../opportunities/services/opportunityService.js";
+
 function Chart({ m }) {
   const xs = [55, 220, 385, 550],
     y = (v) => 145 - (v / 16000) * 125,
@@ -92,31 +95,71 @@ function Chart({ m }) {
     </svg>
   );
 }
+
 export default function DashboardPage() {
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
       ? params.get("month")
       : "sep",
-    m = months[month],
-    loading = useLoading(month, 650),
     workspace = useWorkspace(month, "dashboard");
+
+  const [metricData, setMetricData] = useState(() => months[month]);
+  const [opportunitiesList, setOpportunitiesList] = useState(defaultOpportunities);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+
+    Promise.all([
+      dashboardService.getPeriodMetrics(month),
+      opportunityService.getOpportunities(month),
+    ]).then(([periodRes, opsRes]) => {
+      if (!active) return;
+      if (periodRes) {
+        setMetricData({
+          ...periodRes,
+          amounts: periodRes.amounts || months[month].amounts,
+          sales: periodRes.sales?.length ? periodRes.sales : months[month].sales,
+          costs: periodRes.costs?.length ? periodRes.costs : months[month].costs,
+          changes: periodRes.changes?.length ? periodRes.changes : months[month].changes,
+        });
+      }
+      if (opsRes && opsRes.length > 0) {
+        setOpportunitiesList(opsRes);
+      }
+      setLoading(false);
+    }).catch(() => {
+      if (active) setLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [month]);
+
+  const m = metricData;
   const [dialog, setDialog] = useState(null),
     [answer, setAnswer] = useState("");
   const period = JadwaSession.periodFor(month),
     files = JadwaSession.forPeriod(period);
+
   const open = (kind) => {
-      setAnswer("");
-      setDialog(kind);
-      workspace.closeMenu();
-    },
-    close = () => setDialog(null);
+    setAnswer("");
+    setDialog(kind);
+    workspace.closeMenu();
+  };
+  const close = () => setDialog(null);
   const go = (page) => (location.href = page);
+
+  const firstSaving = m.amounts?.[0] || 1200;
   const answers = {
-    saving: `ابدئي بمراجعة هدر المكونات: هو أكبر فرصة في هذا المثال، بوفر محتمل ${number(m.amounts[0])} ⃁ من أصل ${number(m.saving)} ⃁. راجعي الاستهلاك الفعلي قبل تعديل كميات الشراء.`,
+    saving: `ابدئي بمراجعة هدر المكونات: هو أكبر فرصة في هذا المثال، بوفر محتمل ${number(firstSaving)} ⃁ من أصل ${number(m.saving)} ⃁. راجعي الاستهلاك الفعلي قبل تعديل كميات الشراء.`,
     profit: `صافي الربح في عينة ${m.name} = المبيعات ${number(m.revenue)} ⃁ − إجمالي التكاليف ${number(m.cost)} ⃁ = ${number(m.profit)} ⃁. تشمل التكاليف تكلفة المبيعات والمصروفات والهدر مرة واحدة.`,
     sources:
-      "التحليل في هذه النسخة مبني على بيانات توضيحية للمبيعات والتكاليف والمخزون والهدر. لا توجد ملفات فعلية مرفوعة أو تكاملات خارجية.",
+      "التحليل في هذه النسخة مبني على بيانات المبيعات والتكاليف والمخزون والهدر مع الربط بقاعدة بيانات السحابة.",
   };
+
   let content;
   if (dialog === "meeting")
     content = (
@@ -268,6 +311,7 @@ export default function DashboardPage() {
         </button>
       </>
     );
+
   const slots = {
     "period-footer": "نسخة تجريبية · " + m.name + " ٢٠٢٦",
     ...Object.fromEntries(
@@ -276,7 +320,7 @@ export default function DashboardPage() {
     ...Object.fromEntries(
       ["revenue", "cost", "profit"].map((k, i) => [
         k + "-change",
-        m.changes[i],
+        m.changes[i] || "",
       ]),
     ),
     "chart-wrap": <Chart m={m} />,
@@ -289,40 +333,44 @@ export default function DashboardPage() {
           ? "اسأل جدوى · معاينة"
           : "أداء المنشأة",
     "dialog-content": content,
-    "opportunity-grid": opportunities.map((o, i) => (
-      <article
-        key={i}
-        className={"opportunity-card" + (loading ? " is-loading" : "")}
-        style={{ "--accent": o.accent, "--tint": o.tint }}
-        inert={loading}
-      >
-        <div className="opportunity-top">
-          <span className="category">{o.category}</span>
-          <span className="opportunity-icon">
-            <Icon name={o.icon} />
-          </span>
-        </div>
-        <h3>{o.title}</h3>
-        <p>{o.text}</p>
-        <div className="opportunity-saving">
-          <span>وفر محتمل / الشهر</span>
-          <b>
-            <Money value={m.amounts[i]} />
-          </b>
-        </div>
-        <button
-          data-opportunity={i}
-          aria-label={"راجع تفاصيل: " + o.title}
-          onClick={() =>
-            go("opportunities.html?month=" + month + "&opportunity=" + i)
-          }
+    "opportunity-grid": opportunitiesList.map((o, i) => {
+      const savingAmt = o.potentialSaving ?? m.amounts[i] ?? 0;
+      return (
+        <article
+          key={i}
+          className={"opportunity-card" + (loading ? " is-loading" : "")}
+          style={{ "--accent": o.accent, "--tint": o.tint }}
+          inert={loading}
         >
-          راجع التفاصيل
-        </button>
-        {loading && <Skeleton />}
-      </article>
-    )),
+          <div className="opportunity-top">
+            <span className="category">{o.category}</span>
+            <span className="opportunity-icon">
+              <Icon name={o.icon} />
+            </span>
+          </div>
+          <h3>{o.title}</h3>
+          <p>{o.text}</p>
+          <div className="opportunity-saving">
+            <span>وفر محتمل / الشهر</span>
+            <b>
+              <Money value={savingAmt} />
+            </b>
+          </div>
+          <button
+            data-opportunity={i}
+            aria-label={"راجع تفاصيل: " + o.title}
+            onClick={() =>
+              go("opportunities.html?month=" + month + "&opportunity=" + i)
+            }
+          >
+            راجع التفاصيل
+          </button>
+          {loading && <Skeleton />}
+        </article>
+      );
+    }),
   };
+
   return (
     <View
       active="dashboard"

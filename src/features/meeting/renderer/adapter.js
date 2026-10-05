@@ -307,7 +307,19 @@ export function mountRoom({ canvas, room, logo, onState }) {
 
       if (!response.ok) throw Error("Scene unavailable");
 
-      const data = await response.json();
+      let data;
+      if (
+        typeof DecompressionStream !== "undefined" &&
+        response.body?.pipeThrough
+      ) {
+        const stream = response.body.pipeThrough(
+          new DecompressionStream("gzip"),
+        );
+        const text = await new Response(stream).text();
+        data = JSON.parse(text);
+      } else {
+        data = await response.json();
+      }
       if (!alive) return;
       scene = data;
       await setup();

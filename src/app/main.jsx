@@ -1,5 +1,6 @@
 import React from "react";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import { AuthProvider } from "../shared/lib/authContext.jsx";
 import { createRoot } from "react-dom/client";
 const pages = {
   index: () => import("../features/landing/LandingPage.jsx"),
@@ -22,7 +23,10 @@ const { default: Page } = await (pages[name] || pages.index)();
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <Page mode={name} />
+      <AuthProvider>
+        <Page mode={name} />
+      </AuthProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 );
+

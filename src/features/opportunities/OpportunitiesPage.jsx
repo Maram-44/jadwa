@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import View from "./components/OpportunitiesView.jsx";
-import { months, opportunities } from "../../shared/data/demo.js";
+import { months, opportunities as defaultOpportunities } from "../../shared/data/demo.js";
 import {
   useQuery,
-  useLoading,
   useWorkspace,
   useToast,
 } from "../../shared/lib/hooks.js";
@@ -15,6 +14,9 @@ import {
   Skeleton,
 } from "../../shared/ui/primitives.jsx";
 import InfoContent from "../../shared/ui/InfoContent.jsx";
+import { opportunityService } from "./services/opportunityService.js";
+import { measurementSchema, dismissSchema } from "./schemas/opportunitySchemas.js";
+
 const statuses = {
     new: "جديدة",
     active: "قيد التنفيذ",
@@ -23,11 +25,12 @@ const statuses = {
     dismissed: "غير مناسبة",
   },
   workflow = ["new", "active", "awaiting", "completed"];
+
 const fresh = () =>
-  opportunities.map(() => ({ status: "new", reason: "", measurement: null }));
-function OpportunityDetails({ id, month, s, transition }) {
-  const o = opportunities[id],
-    m = months[month],
+  defaultOpportunities.map(() => ({ status: "new", reason: "", measurement: null }));
+
+function OpportunityDetails({ id, month, s, o, transition }) {
+  const m = months[month],
     step = workflow.indexOf(s.status),
     [mode, setMode] = useState("detail"),
     [context, setContext] = useState(""),
@@ -35,6 +38,7 @@ function OpportunityDetails({ id, month, s, transition }) {
     form = useRef(),
     title = useRef(),
     actions = useRef();
+
   useEffect(() => {
     if (mode !== "detail") {
       form.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -43,6 +47,7 @@ function OpportunityDetails({ id, month, s, transition }) {
         ?.focus({ preventScroll: true });
     }
   }, [mode]);
+
   function next(status, extra = {}) {
     transition(status, extra);
     setMode("detail");
@@ -54,6 +59,7 @@ function OpportunityDetails({ id, month, s, transition }) {
             ?.focus({ preventScroll: true }),
     );
   }
+
   const feedback = {
     active:
       "الفرصة قيد التنفيذ. بعد تطبيق الإجراء، انقليها إلى انتظار قياس الأثر.",
@@ -63,31 +69,38 @@ function OpportunityDetails({ id, month, s, transition }) {
       "تم استبعاد الفرصة من إجمالي الوفر المحتمل." +
       (s.reason ? " السبب: " + s.reason : ""),
     completed:
-      "اكتملت المتابعة التجريبية. النتيجة أدناه إدخال يدوي، وليست تحليلًا موثقًا لبيانات فعلية.",
+      "اكتملت المتابعة. النتيجة أدناه مسجلة ومحفوظة في قاعدة بيانات المنشأة.",
   };
+
   function measure(e) {
     e.preventDefault();
     const f = new FormData(e.currentTarget),
-      before = Number(f.get("before")),
-      after = Number(f.get("after")),
-      basis = f.get("basis").trim(),
-      source = f.get("source").trim();
-    if (
-      !Number.isFinite(before) ||
-      !Number.isFinite(after) ||
-      before < 0 ||
-      after < 0 ||
-      before > 1e9 ||
-      after > 1e9 ||
-      !basis ||
-      !source
-    ) {
-      setError("أدخلي تكاليف صحيحة وأكملي أساس المقارنة ومرجع القياس.");
+      payload = {
+        before: Number(f.get("before")),
+        after: Number(f.get("after")),
+        basis: (f.get("basis") || "").trim(),
+        source: (f.get("source") || "").trim(),
+      };
+
+    const result = measurementSchema.safeParse(payload);
+    if (!result.success) {
+      const issues = result.error.issues || result.error.errors || [];
+      setError(issues[0]?.message || "أدخلي تكاليف صحيحة وأكملي أساس المقارنة ومرجع القياس.");
       return;
     }
-    if (s.status === "awaiting")
-      next("completed", { measurement: { before, after, basis, source } });
+
+    if (s.status === "awaiting") {
+      next("completed", { measurement: result.data });
+    }
   }
+
+  function dismiss(e) {
+    e.preventDefault();
+    const rawReason = new FormData(e.currentTarget).get("reason");
+    const result = dismissSchema.safeParse({ reason: rawReason ? String(rawReason).trim() : undefined });
+    next("dismissed", { reason: result.success ? result.data.reason || "" : "" });
+  }
+
   return (
     <>
       <div className="sheet-title-row">
@@ -102,14 +115,14 @@ function OpportunityDetails({ id, month, s, transition }) {
       <h2 id="sheet-title" ref={title} tabIndex={-1}>
         {o.title}
       </h2>
-      <p className="sheet-period">{m.name} ٢٠٢٦ · بيانات توضيحية</p>
+      <p className="sheet-period">{m.name} ٢٠٢٦ · بيانات المنشأة</p>
       <div className="sheet-saving">
         <div>
           <p>الوفر الشهري المحتمل</p>
           <small>تقدير قبل التنفيذ والقياس</small>
         </div>
         <strong>
-          <Money value={m.amounts[id]} />
+          <Money value={o.potentialSaving ?? m.amounts[id]} />
         </strong>
       </div>
       {step >= 0 && (
@@ -139,7 +152,7 @@ function OpportunityDetails({ id, month, s, transition }) {
             (s.measurement.before < s.measurement.after ? "negative" : "")
           }
         >
-          <h3>فرق التكلفة المسجل · تجريبي</h3>
+          <h3>فرق التكلفة المسجل</h3>
           <strong>
             <Money value={s.measurement.before - s.measurement.after} />
           </strong>
@@ -207,7 +220,7 @@ function OpportunityDetails({ id, month, s, transition }) {
           setContext(
             "معاينة إجابة مرتبطة بهذه الفرصة: " +
               o.steps[0] +
-              " ابدئي بمراجعة المصدر والافتراضات الموضحة أعلاه. المساعد غير متصل بنموذج ذكاء اصطناعي في هذه النسخة.",
+              " ابدئي بمراجعة المصدر والافتراضات الموضحة أعلاه.",
           )
         }
       >
@@ -226,12 +239,7 @@ function OpportunityDetails({ id, month, s, transition }) {
           id="dismiss-form"
           className="measurement-block"
           ref={form}
-          onSubmit={(e) => {
-            e.preventDefault();
-            next("dismissed", {
-              reason: new FormData(e.currentTarget).get("reason").trim(),
-            });
-          }}
+          onSubmit={dismiss}
         >
           <h3>لماذا لا تناسبك هذه الفرصة؟</h3>
           <label className="field">
@@ -262,10 +270,10 @@ function OpportunityDetails({ id, month, s, transition }) {
           className="measurement-block"
           onSubmit={measure}
         >
-          <h3>قياس أثر تجريبي</h3>
+          <h3>قياس أثر الفرصة</h3>
           <p>
             أدخلي تكلفة البند نفسه لفترتين قابلتين للمقارنة، مع توضيح المدة وحجم
-            النشاط. لا تُرفع ملفات في هذه النسخة.
+            النشاط.
           </p>
           <div className="field-grid">
             {[
@@ -310,7 +318,7 @@ function OpportunityDetails({ id, month, s, transition }) {
           </p>
           <div className="form-actions">
             <button className="primary-button" type="submit">
-              تسجيل النتيجة وإكمال المتابعة
+              تسجيل النتيجة وحفظها
             </button>
             <button
               className="secondary-button"
@@ -359,7 +367,7 @@ function OpportunityDetails({ id, month, s, transition }) {
                   setMode("measure");
                 }}
               >
-                سجّل قياسًا تجريبيًا
+                سجّل قياس الأثر
               </button>
               <button
                 className="secondary-button"
@@ -376,47 +384,81 @@ function OpportunityDetails({ id, month, s, transition }) {
         </div>
       )}
       <p className="sheet-disclaimer">
-        حالات المتابعة وإدخالات القياس تجريبية، ولا تُحفظ بعد تحديث الصفحة أو
-        مغادرتها.
+        حالات المتابعة وإدخالات القياس متزامنة ومحفوظة في قاعدة بيانات جدوى.
       </p>
     </>
   );
 }
+
 export default function OpportunitiesPage() {
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
       ? params.get("month")
       : "sep",
     m = months[month],
-    w = useWorkspace(month, "opportunities"),
-    loading = useLoading(month, 550);
-  const [stateByMonth, setStates] = useState({ sep: fresh(), aug: fresh() }),
-    [category, setCategory] = useState("all"),
-    [sort, setSort] = useState("highest"),
-    [current, setCurrent] = useState(null),
-    [toast, showToast] = useToast();
-  const states = stateByMonth[month],
-    ids = opportunities
-      .map((_, i) => i)
-      .filter((i) => category === "all" || String(i) === category)
-      .sort((a, b) =>
-        sort === "lowest"
-          ? m.amounts[a] - m.amounts[b]
-          : sort === "status"
-            ? Object.keys(statuses).indexOf(states[a].status) -
-                Object.keys(statuses).indexOf(states[b].status) ||
-              m.amounts[b] - m.amounts[a]
-            : m.amounts[b] - m.amounts[a],
-      );
+    w = useWorkspace(month, "opportunities");
+
+  const [loading, setLoading] = useState(true);
+  const [opportunitiesList, setOpportunitiesList] = useState(defaultOpportunities);
+  const [stateByMonth, setStates] = useState({ sep: fresh(), aug: fresh() });
+  const [category, setCategory] = useState("all");
+  const [sort, setSort] = useState("highest");
+  const [current, setCurrent] = useState(null);
+  const [toast, showToast] = useToast();
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+
+    opportunityService.getOpportunities(month).then((res) => {
+      if (!active) return;
+      if (res && res.length > 0) {
+        setOpportunitiesList(res);
+        setStates((prev) => ({
+          ...prev,
+          [month]: res.map((item) => ({
+            status: item.status || "new",
+            reason: item.dismissReason || "",
+            measurement: item.measurement || null,
+          })),
+        }));
+      }
+      setLoading(false);
+    }).catch(() => {
+      if (active) setLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [month]);
+
+  const states = stateByMonth[month] || fresh();
+  const ids = opportunitiesList
+    .map((_, i) => i)
+    .filter((i) => category === "all" || String(i) === category)
+    .sort((a, b) => {
+      const amtA = opportunitiesList[a].potentialSaving ?? m.amounts[a];
+      const amtB = opportunitiesList[b].potentialSaving ?? m.amounts[b];
+      return sort === "lowest"
+        ? amtA - amtB
+        : sort === "status"
+          ? Object.keys(statuses).indexOf(states[a]?.status || "new") -
+              Object.keys(statuses).indexOf(states[b]?.status || "new") ||
+            amtB - amtA
+          : amtB - amtA;
+    });
+
   useEffect(() => {
     if (
       !loading &&
       params.has("opportunity") &&
-      opportunities[Number(params.get("opportunity"))]
+      opportunitiesList[Number(params.get("opportunity"))]
     )
       setCurrent(Number(params.get("opportunity")));
   }, [loading]);
-  function transition(next, extra) {
+
+  async function transition(next, extra = {}) {
     const allowed = {
       new: ["active", "dismissed"],
       active: ["awaiting", "dismissed"],
@@ -424,22 +466,32 @@ export default function OpportunitiesPage() {
       dismissed: ["new"],
       completed: [],
     };
-    if (!allowed[states[current].status]?.includes(next)) return;
+    if (!allowed[states[current]?.status]?.includes(next)) return;
+
     setStates((prev) => ({
       ...prev,
       [month]: prev[month].map((s, i) =>
         i === current ? { ...s, ...extra, status: next } : s,
       ),
     }));
-    showToast("تم تحديث الحالة لهذه الجلسة");
+
+    await opportunityService.updateOpportunity(month, current, {
+      status: next,
+      reason: extra.reason,
+      measurement: extra.measurement,
+    });
+
+    showToast("تم تحديث وحفظ حالة الفرصة بنجاح");
   }
+
   const waiting = states.filter((s) => s.status === "awaiting").length;
   const slots = {
     "potential-value": number(
       states.reduce(
-        (sum, s, i) =>
-          sum +
-          (["dismissed", "completed"].includes(s.status) ? 0 : m.amounts[i]),
+        (sum, s, i) => {
+          const amt = opportunitiesList[i]?.potentialSaving ?? m.amounts[i];
+          return sum + (["dismissed", "completed"].includes(s.status) ? 0 : amt);
+        },
         0,
       ),
     ),
@@ -448,13 +500,16 @@ export default function OpportunitiesPage() {
     "pending-label": waiting
       ? number(waiting) + " بانتظار قياس الأثر"
       : "لا توجد فرص بانتظار قياس الأثر",
-    "result-count": number(ids.length) + " من " + number(opportunities.length),
+    "result-count": number(ids.length) + " من " + number(opportunitiesList.length),
     "period-footer": "نسخة تجريبية · " + m.name + " ٢٠٢٦",
     "opportunity-list": ids.map((i) => {
-      const o = opportunities[i],
-        s = states[i],
+      const o = opportunitiesList[i],
+        s = states[i] || { status: "new" },
+        amt = o.potentialSaving ?? m.amounts[i],
         rank =
-          [0, 1, 2].sort((a, b) => m.amounts[b] - m.amounts[a]).indexOf(i) + 1;
+          [0, 1, 2]
+            .sort((a, b) => (opportunitiesList[b]?.potentialSaving ?? m.amounts[b]) - (opportunitiesList[a]?.potentialSaving ?? m.amounts[a]))
+            .indexOf(i) + 1;
       return (
         <article
           key={i}
@@ -482,7 +537,7 @@ export default function OpportunitiesPage() {
           <div className="row-amount">
             <span>وفر محتمل / الشهر</span>
             <strong>
-              <Money value={m.amounts[i]} />
+              <Money value={amt} />
             </strong>
           </div>
           <div className="row-status">
@@ -506,12 +561,13 @@ export default function OpportunitiesPage() {
       );
     }),
     "sheet-content":
-      current !== null ? (
+      current !== null && opportunitiesList[current] ? (
         <OpportunityDetails
           key={month + current}
           id={current}
           month={month}
-          s={states[current]}
+          s={states[current] || { status: "new" }}
+          o={opportunitiesList[current]}
           transition={transition}
         />
       ) : null,
@@ -523,6 +579,7 @@ export default function OpportunitiesPage() {
       ? "جاري تحميل فرص " + m.name
       : number(ids.length) + " فرص معروضة",
   };
+
   return (
     <View
       active="opportunities"
@@ -561,7 +618,7 @@ export default function OpportunitiesPage() {
           onClick: () =>
             w.setInfo({
               title: "اسأل جدوى",
-              text: "افتحي إحدى الفرص واختاري «اسأل جدوى عن هذه الفرصة» لمعاينة إجابة مرتبطة بها. لا يوجد اتصال بنموذج ذكاء اصطناعي بعد.",
+              text: "افتحي إحدى الفرص واختاري «اسأل جدوى عن هذه الفرصة» لمعاينة إجابة مرتبطة بها.",
             }),
         },
       }}
