@@ -14,8 +14,13 @@ import { Summary, Money, number, Icon } from "../../shared/ui/primitives.jsx";
 import DataTable from "../../shared/ui/DataTable.jsx";
 import InfoContent from "../../shared/ui/InfoContent.jsx";
 import { expensesService } from "./services/expensesService.js";
+import { useAuth } from "../../shared/lib/authContext.jsx";
+import { computeAvatarInitial } from "../../shared/types/dto.js";
 
 export default function ExpensesPage() {
+  const { user, loading: authLoading, logout } = useAuth();
+  const isGuest = user?.isGuest ?? false;
+
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
       ? params.get("month")
@@ -23,37 +28,28 @@ export default function ExpensesPage() {
     related = params.get("opportunity") === "2",
     w = useWorkspace(month, "expenses");
 
+  useEffect(() => {
+    if (!authLoading && !user) {
+      location.replace("login.html");
+    }
+  }, [authLoading, user]);
+
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [recurrence, setRecurrence] = useState("all");
   const [sort, setSort] = useState("date-desc");
   const [item, setItem] = useState(null);
-  const [records, setRecords] = useState(() =>
-    defaultRecords.map((r) => ({
-      id: r.id,
-      name: r.name,
-      category: r.category,
-      vendor: r.vendor,
-      recurring: r.recurring,
-      day: r.day,
-      amount: r[month] ?? 0,
-      date: `2026-${month === "aug" ? "08" : "09"}-${String(r.day).padStart(2, "0")}`,
-      opportunity: r.opportunity,
-      renewDay: r.renewDay || null,
-      description: r.description,
-    })),
-  );
+  const [records, setRecords] = useState([]);
 
   useEffect(() => {
+    if (authLoading || !user) return;
     let active = true;
     setLoading(true);
 
-    expensesService.getExpenseRecords(month).then((data) => {
+    expensesService.getExpenseRecords(month, isGuest).then((data) => {
       if (!active) return;
-      if (data && data.length > 0) {
-        setRecords(data);
-      }
+      setRecords(data || []);
       setLoading(false);
     }).catch(() => {
       if (active) setLoading(false);
@@ -62,7 +58,12 @@ export default function ExpensesPage() {
     return () => {
       active = false;
     };
-  }, [month]);
+  }, [month, authLoading, user, isGuest]);
+
+  const displayName = user?.profile?.fullName || (isGuest ? "الشيماء" : (user?.email?.split("@")[0] || "مستخدم"));
+  const avatarChar = isGuest
+    ? "ش"
+    : (computeAvatarInitial(user?.profile?.fullName, user?.email) || (displayName ? displayName.charAt(0) : "م"));
 
   const q = normalizeSearch(query);
   const all = records.map((r, i) => ({
@@ -243,8 +244,36 @@ export default function ExpensesPage() {
         />
       </>
     ),
+    "mini-avatar": avatarChar,
+    "demo-label": isGuest ? "بيانات توضيحية" : "بيانات المنشأة",
+    "topbar-actions": (
+      <button
+        type="button"
+        className="icon-button"
+        onClick={logout}
+        title="تسجيل الخروج"
+        aria-label="تسجيل الخروج"
+        style={{
+          background: "transparent",
+          border: "1px solid #e2e8f0",
+          borderRadius: "6px",
+          padding: "4px 8px",
+          fontSize: "12px",
+          color: "#64748b",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          cursor: "pointer",
+        }}
+      >
+        <svg style={{ width: "14px", height: "14px" }}>
+          <use href="#logout" />
+        </svg>
+        <span>خروج</span>
+      </button>
+    ),
     "distribution-period": m.name + " ٢٠٢٦",
-    "period-footer": "نسخة تجريبية · " + m.name + " ٢٠٢٦",
+    "period-footer": (isGuest ? "نسخة تجريبية · " : "فترة ") + m.name + " ٢٠٢٦",
     "expense-bars": categoriesTotal
       .filter((c) => c.total > 0)
       .map((c) => (

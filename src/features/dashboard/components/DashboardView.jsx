@@ -1,8 +1,22 @@
+import React, { isValidElement } from "react";
 import { Riyal, Skeleton } from "../../../shared/ui/primitives.jsx";
 import Select from "../../../shared/ui/Select.jsx";
 import Dialog from "../../../shared/ui/Dialog.jsx";
 import Sidebar from "../../../shared/ui/Sidebar.jsx";
 import IconDefinitions from "../../../shared/ui/IconDefinitions.jsx";
+
+function renderChangeText(val, fallback) {
+  if (val === undefined || val === null) return fallback;
+  if (typeof val === "object" && !isValidElement(val)) {
+    if (val.label) return String(val.label);
+    if (val.percent !== undefined && val.percent !== null) {
+      const sign = val.direction === "down" || val.percent < 0 ? "-" : "+";
+      return `${sign}${Math.abs(val.percent)}٪`;
+    }
+    return "";
+  }
+  return val;
+}
 export default function DashboardView({
   slots = {},
   bindings = {},
@@ -48,11 +62,12 @@ export default function DashboardView({
           </div>
           <div className={"topbar-left"} {...bindings[".topbar-left"]}>
             <span className={"demo-label"} {...bindings[".demo-label"]}>
-              {"بيانات توضيحية"}
+              {Object.hasOwn(slots, "demo-label") ? slots["demo-label"] : "بيانات توضيحية"}
             </span>
             <span className={"mini-avatar"} {...bindings[".mini-avatar"]}>
-              {"ش"}
+              {Object.hasOwn(slots, "mini-avatar") ? slots["mini-avatar"] : "ش"}
             </span>
+            {Object.hasOwn(slots, "topbar-actions") ? slots["topbar-actions"] : null}
           </div>
         </header>
         <div className={"page-content"} {...bindings[".page-content"]}>
@@ -62,11 +77,17 @@ export default function DashboardView({
                 {"من البيانات إلى القرار"}
               </div>
               <h1>
-                {"صباح الخير، الشيماء "}
-                <span
-                  className={"greeting-dot"}
-                  {...bindings[".greeting-dot"]}
-                ></span>
+                {Object.hasOwn(slots, "greeting") ? (
+                  slots["greeting"]
+                ) : (
+                  <>
+                    {"صباح الخير، الشيماء "}
+                    <span
+                      className={"greeting-dot"}
+                      {...bindings[".greeting-dot"]}
+                    ></span>
+                  </>
+                )}
               </h1>
               <p>{"نظرة على أداء منشأتك، وفرص تستحق انتباهك."}</p>
             </div>
@@ -246,7 +267,7 @@ export default function DashboardView({
                   ref={refs["revenue-change"]}
                 >
                   {Object.hasOwn(slots, "revenue-change") ? (
-                    slots["revenue-change"]
+                    renderChangeText(slots["revenue-change"], <>{"+١٥٪"}</>)
                   ) : (
                     <>{"+١٥٪"}</>
                   )}
@@ -316,7 +337,7 @@ export default function DashboardView({
                   ref={refs["cost-change"]}
                 >
                   {Object.hasOwn(slots, "cost-change") ? (
-                    slots["cost-change"]
+                    renderChangeText(slots["cost-change"], <>{"+٨٪"}</>)
                   ) : (
                     <>{"+٨٪"}</>
                   )}
@@ -390,7 +411,7 @@ export default function DashboardView({
                   ref={refs["profit-change"]}
                 >
                   {Object.hasOwn(slots, "profit-change") ? (
-                    slots["profit-change"]
+                    renderChangeText(slots["profit-change"], <>{"+٤٢٪"}</>)
                   ) : (
                     <>{"+٤٢٪"}</>
                   )}

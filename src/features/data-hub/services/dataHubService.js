@@ -1,15 +1,20 @@
 import { supabase, isSupabaseConfigured } from "../../../shared/lib/supabase.js";
 import { JadwaSession } from "../../../shared/lib/session.js";
 import { toDataHubFileDTO } from "../../../shared/types/dto.js";
+import { authService } from "../../auth/services/authService.js";
 
 export const dataHubService = {
   /**
    * Get all prepared data files, synchronizing remote Supabase storage with tab session
    */
-  async getFiles(period) {
-    const sessionFiles = JadwaSession.files();
+  async getFiles(period, explicitIsGuest = null) {
+    let isGuest = explicitIsGuest;
+    if (isGuest === null) {
+      const user = await authService.getCurrentUser();
+      isGuest = Boolean(user && user.isGuest);
+    }
 
-    if (isSupabaseConfigured && supabase) {
+    if (!isGuest && isSupabaseConfigured && supabase) {
       try {
         let query = supabase.from("data_hub_files").select("*");
         if (period) {
@@ -17,27 +22,23 @@ export const dataHubService = {
         }
         const { data, error } = await query;
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           const remoteFiles = data.map(toDataHubFileDTO);
-          // Merge remote files with session files, deduplicating by ID/type+period
-          const merged = [...sessionFiles];
-          for (const rf of remoteFiles) {
-            const exists = merged.some(
-              (f) => f.id === rf.id || (f.type === rf.type && f.result.period === rf.result.period),
-            );
-            if (!exists) {
-              merged.push(rf);
-            }
-          }
-          JadwaSession.save(merged);
-          return period ? merged.filter((f) => f.result.period === period) : merged;
+          return period ? remoteFiles.filter((f) => f.result?.period === period) : remoteFiles;
         }
+        return [];
       } catch (err) {
         console.warn("[Data Hub Service] Error reading remote files:", err);
+        return [];
       }
     }
 
-    return period ? JadwaSession.forPeriod(period) : sessionFiles;
+    if (isGuest) {
+      const sessionFiles = JadwaSession.files();
+      return period ? JadwaSession.forPeriod(period) : sessionFiles;
+    }
+
+    return [];
   },
 
   /**

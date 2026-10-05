@@ -2,7 +2,11 @@
 // Ensures frontend components receive predictable, domain-specific structures.
 
 /**
- * Computes the avatar initial from a full name or email
+ * Computes the avatar initial dynamically from full name or email
+ * Examples:
+ * "محمد العتيبي" -> "م"
+ * "Maram Saleh" -> "M"
+ * If full_name is unavailable, use the first character of the email.
  */
 export function computeAvatarInitial(fullName, email) {
   if (fullName && typeof fullName === "string" && fullName.trim().length > 0) {
@@ -11,7 +15,7 @@ export function computeAvatarInitial(fullName, email) {
   if (email && typeof email === "string" && email.trim().length > 0) {
     return email.trim().charAt(0).toUpperCase();
   }
-  return "م";
+  return "";
 }
 
 /**
@@ -19,17 +23,14 @@ export function computeAvatarInitial(fullName, email) {
  */
 export function toProfileDTO(row) {
   if (!row) return null;
-  const fullName = row.full_name || "";
-  const email = row.email || "";
-  const avatarInitial =
-    row.avatar_initial && row.avatar_initial !== "ش"
-      ? row.avatar_initial
-      : computeAvatarInitial(fullName, email);
+  const fullName = row.full_name ? row.full_name.trim() : "";
+  const email = row.email ? row.email.trim() : "";
+  const avatarInitial = computeAvatarInitial(fullName, email) || (email ? email.charAt(0).toUpperCase() : "");
 
   return {
     id: row.id,
     email,
-    fullName: fullName || "مستخدم جديد",
+    fullName: fullName || (email ? email.split("@")[0] : "مستخدم"),
     businessName: row.business_name || "منشأتي",
     businessType: row.business_type || "مقهى ومطعم",
     role: row.role || "مالكة المنشأة",
@@ -38,10 +39,32 @@ export function toProfileDTO(row) {
 }
 
 /**
+ * Formats a metric change entry (string or object with label/percent/direction)
+ */
+export function formatChange(val) {
+  if (typeof val === "string") return val;
+  if (val && typeof val === "object") {
+    if (typeof val.label === "string" && val.label.trim()) return val.label.trim();
+    if (val.percent !== undefined && val.percent !== null) {
+      const sign = val.direction === "down" || val.percent < 0 ? "-" : "+";
+      return `${sign}${Math.abs(val.percent)}٪`;
+    }
+    if (val.percentage !== undefined && val.percentage !== null) {
+      const sign = val.direction === "down" || val.percentage < 0 ? "-" : "+";
+      return `${sign}${Math.abs(val.percentage)}٪`;
+    }
+  }
+  return typeof val === "number" ? String(val) : "";
+}
+
+/**
  * Transforms a business period row into a dashboard period DTO
  */
 export function toPeriodDTO(row) {
   if (!row) return null;
+  const rawChanges = Array.isArray(row.changes) ? row.changes : ["+١٥٪", "+٨٪", "+٤٢٪"];
+  const changes = rawChanges.map((c) => formatChange(c) || "");
+
   return {
     periodKey: row.period_key,
     monthCode: row.month_code,
@@ -53,7 +76,7 @@ export function toPeriodDTO(row) {
     saving: Number(row.potential_saving) || 0,
     sales: Array.isArray(row.weekly_sales) ? row.weekly_sales : [],
     costs: Array.isArray(row.weekly_costs) ? row.weekly_costs : [],
-    changes: Array.isArray(row.changes) ? row.changes : ["+١٥٪", "+٨٪", "+٤٢٪"],
+    changes,
   };
 }
 

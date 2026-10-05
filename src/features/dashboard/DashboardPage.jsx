@@ -12,6 +12,8 @@ import {
 import { JadwaSession } from "../../shared/lib/session.js";
 import { dashboardService } from "./services/dashboardService.js";
 import { opportunityService } from "../opportunities/services/opportunityService.js";
+import { useAuth } from "../../shared/lib/authContext.jsx";
+import { computeAvatarInitial, formatChange } from "../../shared/types/dto.js";
 
 function Chart({ m }) {
   const xs = [55, 220, 385, 550],
@@ -97,37 +99,39 @@ function Chart({ m }) {
 }
 
 export default function DashboardPage() {
+  const { user, loading: authLoading, logout } = useAuth();
+  const isGuest = user?.isGuest ?? false;
+
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
       ? params.get("month")
       : "sep",
     workspace = useWorkspace(month, "dashboard");
 
-  const [metricData, setMetricData] = useState(() => months[month]);
-  const [opportunitiesList, setOpportunitiesList] = useState(defaultOpportunities);
+  useEffect(() => {
+    if (!authLoading && !user) {
+      location.replace("login.html");
+    }
+  }, [authLoading, user]);
+
+  const [metricData, setMetricData] = useState(null);
+  const [opportunitiesList, setOpportunitiesList] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading || !user) return;
     let active = true;
     setLoading(true);
 
     Promise.all([
-      dashboardService.getPeriodMetrics(month),
-      opportunityService.getOpportunities(month),
+      dashboardService.getPeriodMetrics(month, isGuest),
+      opportunityService.getOpportunities(month, isGuest),
     ]).then(([periodRes, opsRes]) => {
       if (!active) return;
       if (periodRes) {
-        setMetricData({
-          ...periodRes,
-          amounts: periodRes.amounts || months[month].amounts,
-          sales: periodRes.sales?.length ? periodRes.sales : months[month].sales,
-          costs: periodRes.costs?.length ? periodRes.costs : months[month].costs,
-          changes: periodRes.changes?.length ? periodRes.changes : months[month].changes,
-        });
+        setMetricData(periodRes);
       }
-      if (opsRes && opsRes.length > 0) {
-        setOpportunitiesList(opsRes);
-      }
+      setOpportunitiesList(opsRes || []);
       setLoading(false);
     }).catch(() => {
       if (active) setLoading(false);
@@ -136,9 +140,24 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [month]);
+  }, [month, authLoading, user, isGuest]);
 
-  const m = metricData;
+  const m = metricData || {
+    name: month === "aug" ? "أغسطس" : "سبتمبر",
+    revenue: 0,
+    cost: 0,
+    profit: 0,
+    saving: 0,
+    sales: [0, 0, 0, 0],
+    costs: [0, 0, 0, 0],
+    changes: ["٠٪", "٠٪", "٠٪"],
+    amounts: [0, 0, 0],
+  };
+
+  const displayName = user?.profile?.fullName || (isGuest ? "الشيماء" : (user?.email?.split("@")[0] || "مستخدم"));
+  const avatarChar = isGuest
+    ? "ش"
+    : (computeAvatarInitial(user?.profile?.fullName, user?.email) || (displayName ? displayName.charAt(0) : "م"));
   const [dialog, setDialog] = useState(null),
     [answer, setAnswer] = useState("");
   const period = JadwaSession.periodFor(month),
@@ -313,14 +332,48 @@ export default function DashboardPage() {
     );
 
   const slots = {
-    "period-footer": "نسخة تجريبية · " + m.name + " ٢٠٢٦",
+    "mini-avatar": avatarChar,
+    "demo-label": isGuest ? "بيانات توضيحية" : "بيانات المنشأة",
+    greeting: (
+      <>
+        {"صباح الخير، " + displayName + " "}
+        <span className="greeting-dot"></span>
+      </>
+    ),
+    "topbar-actions": (
+      <button
+        type="button"
+        className="icon-button"
+        onClick={logout}
+        title="تسجيل الخروج"
+        aria-label="تسجيل الخروج"
+        style={{
+          background: "transparent",
+          border: "1px solid #e2e8f0",
+          borderRadius: "6px",
+          padding: "4px 8px",
+          fontSize: "12px",
+          color: "#64748b",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          cursor: "pointer",
+        }}
+      >
+        <svg style={{ width: "14px", height: "14px" }}>
+          <use href="#logout" />
+        </svg>
+        <span>خروج</span>
+      </button>
+    ),
+    "period-footer": (isGuest ? "نسخة تجريبية · " : "فترة ") + m.name + " ٢٠٢٦",
     ...Object.fromEntries(
-      ["revenue", "cost", "profit", "saving"].map((k) => [k, number(m[k])]),
+      ["revenue", "cost", "profit", "saving"].map((k) => [k, number(m[k] || 0)]),
     ),
     ...Object.fromEntries(
       ["revenue", "cost", "profit"].map((k, i) => [
         k + "-change",
-        m.changes[i] || "",
+        formatChange(m.changes?.[i]) || "",
       ]),
     ),
     "chart-wrap": <Chart m={m} />,
@@ -333,8 +386,8 @@ export default function DashboardPage() {
           ? "اسأل جدوى · معاينة"
           : "أداء المنشأة",
     "dialog-content": content,
-    "opportunity-grid": opportunitiesList.map((o, i) => {
-      const savingAmt = o.potentialSaving ?? m.amounts[i] ?? 0;
+    "opportunity-grid": opportunitiesList.length > 0 ? opportunitiesList.map((o, i) => {
+      const savingAmt = o.potentialSaving ?? m.amounts?.[i] ?? 0;
       return (
         <article
           key={i}
@@ -368,7 +421,14 @@ export default function DashboardPage() {
           {loading && <Skeleton />}
         </article>
       );
-    }),
+    }) : (
+      !loading ? (
+        <div style={{ gridColumn: "1 / -1", padding: "32px", textAlign: "center", color: "#64748b", background: "white", borderRadius: "12px", border: "1px solid #e9edf3" }}>
+          <p style={{ margin: "0 0 6px", fontWeight: "500", color: "#334155" }}>لا توجد فرص مسجلة حاليًا لهذه الفترة</p>
+          <small style={{ color: "#94a3b8" }}>يمكنك إضافة ملفات المبيعات والمصروفات من مركز البيانات لبدء التحليل واكتشاف فرص التوفير.</small>
+        </div>
+      ) : null
+    ),
   };
 
   return (

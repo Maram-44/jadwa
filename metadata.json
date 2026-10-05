@@ -2,5 +2,7 @@
   "name": "Jadwa",
   "description": "من أرقام مبعثرة، لقرارات أوضح - منصة ذكية لتحليل مبيعات ومصاريف ومخزون المنشآت",
   "permissions": [],
-  "capabilities": []
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

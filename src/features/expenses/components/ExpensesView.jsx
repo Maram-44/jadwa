@@ -54,11 +54,12 @@ export default function ExpensesView({
           </div>
           <div className={"topbar-left"} {...bindings[".topbar-left"]}>
             <span className={"demo-label"} {...bindings[".demo-label"]}>
-              {"بيانات توضيحية"}
+              {Object.hasOwn(slots, "demo-label") ? slots["demo-label"] : "بيانات توضيحية"}
             </span>
             <span className={"mini-avatar"} {...bindings[".mini-avatar"]}>
-              {"ش"}
+              {Object.hasOwn(slots, "mini-avatar") ? slots["mini-avatar"] : "ش"}
             </span>
+            {Object.hasOwn(slots, "topbar-actions") ? slots["topbar-actions"] : null}
           </div>
         </header>
         <div

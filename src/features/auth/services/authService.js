@@ -18,13 +18,12 @@ export const authService = {
             localStorage.removeItem(LOCAL_SESSION_KEY);
           } catch {}
 
-          const isDemoEmail = user.email === DEMO_CREDENTIALS.email;
           const profile = await this.getProfile(user.id, user);
           return {
             id: user.id,
             email: user.email,
             profile,
-            isGuest: isDemoEmail,
+            isGuest: false,
           };
         }
       } catch (e) {
@@ -62,18 +61,20 @@ export const authService = {
 
     const isDemoEmail = authUser?.email === DEMO_CREDENTIALS.email;
     const meta = authUser?.user_metadata || {};
-    const fallbackName = meta.full_name || (authUser?.email ? authUser.email.split("@")[0] : "");
-    const fallbackInitial = computeAvatarInitial(fallbackName, authUser?.email);
+    const metaFullName = meta.full_name?.trim() || "";
+    const emailFallbackName = authUser?.email ? authUser.email.split("@")[0] : "";
+    const resolvedFallbackName = metaFullName || emailFallbackName || (isDemoEmail ? "الشيماء" : "مستخدم");
+    const fallbackInitial = computeAvatarInitial(resolvedFallbackName, authUser?.email);
 
     if (!isSupabaseConfigured || !supabase) {
       return {
         id: userId,
         email: authUser?.email || "",
-        fullName: fallbackName || (isDemoEmail ? "الشيماء" : "مستخدم جديد"),
+        fullName: resolvedFallbackName,
         businessName: meta.business_name || "منشأتي",
         businessType: "مقهى ومطعم",
         role: "مالكة المنشأة",
-        avatarInitial: isDemoEmail && !fallbackName ? "ش" : fallbackInitial,
+        avatarInitial: fallbackInitial,
       };
     }
 
@@ -82,14 +83,19 @@ export const authService = {
         .from("profiles")
         .select("*")
         .eq("id", userId)
-        .single();
+        .maybeSingle();
 
       if (!error && data) {
         const dto = toProfileDTO(data);
-        if ((!dto.fullName || dto.fullName === "مستخدم جديد") && fallbackName) {
-          dto.fullName = fallbackName;
-          dto.avatarInitial = fallbackInitial;
+        // If profile was populated with default 'الشيماء' but this is a real user
+        if (!isDemoEmail) {
+          if (metaFullName) {
+            dto.fullName = metaFullName;
+          } else if (dto.fullName === "الشيماء" || !dto.fullName) {
+            dto.fullName = emailFallbackName || "مستخدم";
+          }
         }
+        dto.avatarInitial = computeAvatarInitial(dto.fullName, authUser?.email || dto.email);
         return dto;
       }
 
@@ -97,11 +103,11 @@ export const authService = {
       const profileToCreate = {
         id: userId,
         email: authUser?.email || "",
-        full_name: fallbackName || (isDemoEmail ? "الشيماء" : "مستخدم جديد"),
+        full_name: resolvedFallbackName,
         business_name: meta.business_name || "منشأتي",
         business_type: "مقهى ومطعم",
         role: "مالكة المنشأة",
-        avatar_initial: isDemoEmail && !fallbackName ? "ش" : fallbackInitial,
+        avatar_initial: fallbackInitial,
       };
 
       await supabase
@@ -114,11 +120,11 @@ export const authService = {
       return {
         id: userId,
         email: authUser?.email || "",
-        fullName: fallbackName || (isDemoEmail ? "الشيماء" : "مستخدم جديد"),
+        fullName: resolvedFallbackName,
         businessName: meta.business_name || "منشأتي",
         businessType: "مقهى ومطعم",
         role: "مالكة المنشأة",
-        avatarInitial: isDemoEmail && !fallbackName ? "ش" : fallbackInitial,
+        avatarInitial: fallbackInitial,
       };
     }
   },
@@ -179,6 +185,12 @@ export const authService = {
           .catch(() => {});
       }
 
+      // Explicitly sign out so user goes through normal login flow
+      await supabase.auth.signOut().catch(() => {});
+      try {
+        localStorage.removeItem(LOCAL_SESSION_KEY);
+      } catch {}
+
       return { user, error: null };
     } catch (err) {
       return { user: null, error: err.message || "حدث خطأ أثناء إنشاء الحساب." };
@@ -225,13 +237,12 @@ export const authService = {
       }
 
       const profile = await this.getProfile(data.user.id, data.user);
-      const isDemo = data.user.email === DEMO_CREDENTIALS.email;
       return {
         user: {
           id: data.user.id,
           email: data.user.email,
           profile,
-          isGuest: isDemo,
+          isGuest: false,
         },
         error: null,
       };

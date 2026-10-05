@@ -16,6 +16,8 @@ import {
 import InfoContent from "../../shared/ui/InfoContent.jsx";
 import { opportunityService } from "./services/opportunityService.js";
 import { measurementSchema, dismissSchema } from "./schemas/opportunitySchemas.js";
+import { useAuth } from "../../shared/lib/authContext.jsx";
+import { computeAvatarInitial } from "../../shared/types/dto.js";
 
 const statuses = {
     new: "جديدة",
@@ -391,6 +393,9 @@ function OpportunityDetails({ id, month, s, o, transition }) {
 }
 
 export default function OpportunitiesPage() {
+  const { user, loading: authLoading, logout } = useAuth();
+  const isGuest = user?.isGuest ?? false;
+
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
       ? params.get("month")
@@ -398,21 +403,28 @@ export default function OpportunitiesPage() {
     m = months[month],
     w = useWorkspace(month, "opportunities");
 
+  useEffect(() => {
+    if (!authLoading && !user) {
+      location.replace("login.html");
+    }
+  }, [authLoading, user]);
+
   const [loading, setLoading] = useState(true);
-  const [opportunitiesList, setOpportunitiesList] = useState(defaultOpportunities);
-  const [stateByMonth, setStates] = useState({ sep: fresh(), aug: fresh() });
+  const [opportunitiesList, setOpportunitiesList] = useState([]);
+  const [stateByMonth, setStates] = useState({ sep: [], aug: [] });
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState("highest");
   const [current, setCurrent] = useState(null);
   const [toast, showToast] = useToast();
 
   useEffect(() => {
+    if (authLoading || !user) return;
     let active = true;
     setLoading(true);
 
-    opportunityService.getOpportunities(month).then((res) => {
+    opportunityService.getOpportunities(month, isGuest).then((res) => {
       if (!active) return;
-      if (res && res.length > 0) {
+      if (res) {
         setOpportunitiesList(res);
         setStates((prev) => ({
           ...prev,
@@ -431,7 +443,12 @@ export default function OpportunitiesPage() {
     return () => {
       active = false;
     };
-  }, [month]);
+  }, [month, authLoading, user, isGuest]);
+
+  const displayName = user?.profile?.fullName || (isGuest ? "الشيماء" : (user?.email?.split("@")[0] || "مستخدم"));
+  const avatarChar = isGuest
+    ? "ش"
+    : (computeAvatarInitial(user?.profile?.fullName, user?.email) || (displayName ? displayName.charAt(0) : "م"));
 
   const states = stateByMonth[month] || fresh();
   const ids = opportunitiesList
@@ -486,10 +503,38 @@ export default function OpportunitiesPage() {
 
   const waiting = states.filter((s) => s.status === "awaiting").length;
   const slots = {
+    "mini-avatar": avatarChar,
+    "demo-label": isGuest ? "بيانات توضيحية" : "بيانات المنشأة",
+    "topbar-actions": (
+      <button
+        type="button"
+        className="icon-button"
+        onClick={logout}
+        title="تسجيل الخروج"
+        aria-label="تسجيل الخروج"
+        style={{
+          background: "transparent",
+          border: "1px solid #e2e8f0",
+          borderRadius: "6px",
+          padding: "4px 8px",
+          fontSize: "12px",
+          color: "#64748b",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          cursor: "pointer",
+        }}
+      >
+        <svg style={{ width: "14px", height: "14px" }}>
+          <use href="#logout" />
+        </svg>
+        <span>خروج</span>
+      </button>
+    ),
     "potential-value": number(
       states.reduce(
         (sum, s, i) => {
-          const amt = opportunitiesList[i]?.potentialSaving ?? m.amounts[i];
+          const amt = opportunitiesList[i]?.potentialSaving ?? m.amounts[i] ?? 0;
           return sum + (["dismissed", "completed"].includes(s.status) ? 0 : amt);
         },
         0,
@@ -501,15 +546,16 @@ export default function OpportunitiesPage() {
       ? number(waiting) + " بانتظار قياس الأثر"
       : "لا توجد فرص بانتظار قياس الأثر",
     "result-count": number(ids.length) + " من " + number(opportunitiesList.length),
-    "period-footer": "نسخة تجريبية · " + m.name + " ٢٠٢٦",
-    "opportunity-list": ids.map((i) => {
+    "period-footer": (isGuest ? "نسخة تجريبية · " : "فترة ") + m.name + " ٢٠٢٦",
+    "opportunity-list": ids.length > 0 ? ids.map((i) => {
       const o = opportunitiesList[i],
         s = states[i] || { status: "new" },
-        amt = o.potentialSaving ?? m.amounts[i],
+        amt = o?.potentialSaving ?? m.amounts[i] ?? 0,
         rank =
           [0, 1, 2]
-            .sort((a, b) => (opportunitiesList[b]?.potentialSaving ?? m.amounts[b]) - (opportunitiesList[a]?.potentialSaving ?? m.amounts[a]))
+            .sort((a, b) => (opportunitiesList[b]?.potentialSaving ?? m.amounts[b] ?? 0) - (opportunitiesList[a]?.potentialSaving ?? m.amounts[a] ?? 0))
             .indexOf(i) + 1;
+      if (!o) return null;
       return (
         <article
           key={i}
@@ -559,7 +605,14 @@ export default function OpportunitiesPage() {
           {loading && <Skeleton />}
         </article>
       );
-    }),
+    }) : (
+      !loading ? (
+        <div style={{ padding: "36px", textAlign: "center", color: "#64748b", background: "white", borderRadius: "12px", border: "1px solid #e9edf3" }}>
+          <p style={{ margin: "0 0 6px", fontWeight: "500", color: "#334155" }}>لا توجد فرص مسجلة حاليًا لهذه الفترة</p>
+          <small style={{ color: "#94a3b8" }}>يمكنك إضافة مصادر البيانات عبر مركز البيانات للبدء في توليد فرص التوفير.</small>
+        </div>
+      ) : null
+    ),
     "sheet-content":
       current !== null && opportunitiesList[current] ? (
         <OpportunityDetails

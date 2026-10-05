@@ -5,6 +5,8 @@ import { measurementSchema, dismissSchema } from "../src/features/opportunities/
 import { expenseSchema } from "../src/features/expenses/schemas/expenseSchemas.js";
 import { csvFileMetaSchema } from "../src/features/data-hub/schemas/dataHubSchemas.js";
 import {
+  computeAvatarInitial,
+  formatChange,
   toProfileDTO,
   toPeriodDTO,
   toOpportunityDTO,
@@ -167,3 +169,36 @@ test("DTO converters format database rows properly", () => {
   assert.equal(expense.amount, 500);
   assert.equal(expense.recurring, true);
 });
+
+test("Dynamic avatar initial computes correctly from full name or email fallback", () => {
+  assert.equal(computeAvatarInitial("محمد العتيبي", "m@example.com"), "م");
+  assert.equal(computeAvatarInitial("Maram Saleh", "maram@example.com"), "M");
+  assert.equal(computeAvatarInitial("الشيماء", "demo@jadwa.app"), "ا");
+  assert.equal(computeAvatarInitial("", "maram@example.com"), "M");
+  assert.equal(computeAvatarInitial(null, "s22170211221@hu.edu.ye"), "S");
+  assert.equal(computeAvatarInitial("  خالد عبد الله  ", ""), "خ");
+});
+
+test("Period DTO properly converts object changes with {label, percent, direction}", () => {
+  assert.equal(formatChange({ label: "+١٥٪", percent: 15, direction: "up" }), "+١٥٪");
+  assert.equal(formatChange({ percent: 8, direction: "down" }), "-8٪");
+  assert.equal(formatChange("+٤٢٪"), "+٤٢٪");
+
+  const periodWithObjChanges = toPeriodDTO({
+    period_key: "2026-09",
+    month_code: "sep",
+    name: "سبتمبر",
+    revenue: 48000,
+    cost: 36000,
+    profit: 12000,
+    changes: [
+      { label: "+١٥٪", percent: 15, direction: "up" },
+      { label: "+٨٪", percent: 8, direction: "up" },
+      { label: "+٤٢٪", percent: 42, direction: "up" },
+    ],
+  });
+
+  assert.deepEqual(periodWithObjChanges.changes, ["+١٥٪", "+٨٪", "+٤٢٪"]);
+  assert.equal(typeof periodWithObjChanges.changes[0], "string");
+});
+

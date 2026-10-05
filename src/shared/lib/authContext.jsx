@@ -37,7 +37,7 @@ export function AuthProvider({ children }) {
             id: session.user.id,
             email: session.user.email,
             profile,
-            isGuest: session.user.email === "demo@jadwa.app",
+            isGuest: false,
           });
         } else if (event === "SIGNED_OUT") {
           setUser(null);
@@ -74,8 +74,14 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    await authService.signOut();
+    try {
+      await authService.signOut();
+    } catch {}
     setUser(null);
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {}
     location.href = "login.html";
   };
 

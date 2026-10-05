@@ -8,15 +8,22 @@ import {
   marginTarget,
 } from "../../../shared/data/catalog.js";
 import { toProductDTO, toInventoryDTO } from "../../../shared/types/dto.js";
+import { authService } from "../../auth/services/authService.js";
 
 export const catalogService = {
   /**
    * Fetch products for the given month
    */
-  async getProducts(monthCode = "sep") {
+  async getProducts(monthCode = "sep", explicitIsGuest = null) {
     const periodKey = monthCode === "aug" ? "2026-08" : "2026-09";
 
-    if (isSupabaseConfigured && supabase) {
+    let isGuest = explicitIsGuest;
+    if (isGuest === null) {
+      const user = await authService.getCurrentUser();
+      isGuest = Boolean(user && user.isGuest);
+    }
+
+    if (!isGuest && isSupabaseConfigured && supabase) {
       try {
         const { data: productsData, error: prodErr } = await supabase
           .from("products")
@@ -27,7 +34,7 @@ export const catalogService = {
           .select("*")
           .eq("period_key", periodKey);
 
-        if (!prodErr && !metErr && productsData && productsData.length > 0) {
+        if (!prodErr && !metErr && productsData) {
           const metricsMap = new Map((metricsData || []).map((m) => [m.product_id, m]));
           return productsData.map((p) => {
             const m = metricsMap.get(p.id);
@@ -38,21 +45,33 @@ export const catalogService = {
             };
           });
         }
+        return [];
       } catch (err) {
         console.warn("[Catalog Service] Error fetching products from Supabase:", err);
+        return [];
       }
     }
 
-    return fallbackProducts;
+    if (isGuest) {
+      return fallbackProducts;
+    }
+
+    return [];
   },
 
   /**
    * Fetch inventory items for the given month
    */
-  async getInventory(monthCode = "sep") {
+  async getInventory(monthCode = "sep", explicitIsGuest = null) {
     const periodKey = monthCode === "aug" ? "2026-08" : "2026-09";
 
-    if (isSupabaseConfigured && supabase) {
+    let isGuest = explicitIsGuest;
+    if (isGuest === null) {
+      const user = await authService.getCurrentUser();
+      isGuest = Boolean(user && user.isGuest);
+    }
+
+    if (!isGuest && isSupabaseConfigured && supabase) {
       try {
         const { data: itemsData, error: itemErr } = await supabase
           .from("inventory_items")
@@ -63,19 +82,25 @@ export const catalogService = {
           .select("*")
           .eq("period_key", periodKey);
 
-        if (!itemErr && !metErr && itemsData && itemsData.length > 0) {
+        if (!itemErr && !metErr && itemsData) {
           const metricsMap = new Map((metricsData || []).map((m) => [m.item_id, m]));
           return itemsData.map((i) => {
             const m = metricsMap.get(i.id);
             return toInventoryDTO(i, m);
           });
         }
+        return [];
       } catch (err) {
         console.warn("[Catalog Service] Error fetching inventory from Supabase:", err);
+        return [];
       }
     }
 
-    return fallbackStock;
+    if (isGuest) {
+      return fallbackStock;
+    }
+
+    return [];
   },
 
   /**
@@ -91,8 +116,11 @@ export const catalogService = {
       sortKey = null,
       direction = "asc",
     } = {},
+    explicitIsGuest = null,
   ) {
-    const source = tab === "products" ? await this.getProducts(period) : await this.getInventory(period);
+    const source = tab === "products"
+      ? await this.getProducts(period, explicitIsGuest)
+      : await this.getInventory(period, explicitIsGuest);
     const metricsFn = tab === "products" ? productMetrics : stockMetrics;
 
     const priority =

@@ -15,8 +15,13 @@ import { Summary, Money, number, Icon } from "../../shared/ui/primitives.jsx";
 import DataTable from "../../shared/ui/DataTable.jsx";
 import InfoContent from "../../shared/ui/InfoContent.jsx";
 import { catalogService } from "./services/catalogService.js";
+import { useAuth } from "../../shared/lib/authContext.jsx";
+import { computeAvatarInitial } from "../../shared/types/dto.js";
 
 export default function CatalogPage() {
+  const { user, loading: authLoading, logout } = useAuth();
+  const isGuest = user?.isGuest ?? false;
+
   const [params, update] = useQuery(),
     month = Object.hasOwn(months, params.get("month"))
       ? params.get("month")
@@ -26,14 +31,20 @@ export default function CatalogPage() {
       ? Number(params.get("opportunity"))
       : null;
 
+  useEffect(() => {
+    if (!authLoading && !user) {
+      location.replace("login.html");
+    }
+  }, [authLoading, user]);
+
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("all"),
     [sortKey, setSort] = useState(null),
     [direction, setDirection] = useState("asc"),
     [item, setItem] = useState(null);
 
-  const [productsList, setProductsList] = useState(defaultProducts);
-  const [stockList, setStockList] = useState(defaultStock);
+  const [productsList, setProductsList] = useState([]);
+  const [stockList, setStockList] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const w = useWorkspace(month, "catalog"),
@@ -41,16 +52,17 @@ export default function CatalogPage() {
     stockTab = useRef();
 
   useEffect(() => {
+    if (authLoading || !user) return;
     let active = true;
     setLoading(true);
 
     Promise.all([
-      catalogService.getProducts(month),
-      catalogService.getInventory(month),
+      catalogService.getProducts(month, isGuest),
+      catalogService.getInventory(month, isGuest),
     ]).then(([prods, inv]) => {
       if (!active) return;
-      if (prods && prods.length > 0) setProductsList(prods);
-      if (inv && inv.length > 0) setStockList(inv);
+      if (prods) setProductsList(prods);
+      if (inv) setStockList(inv);
       setLoading(false);
     }).catch(() => {
       if (active) setLoading(false);
@@ -59,7 +71,12 @@ export default function CatalogPage() {
     return () => {
       active = false;
     };
-  }, [month]);
+  }, [month, authLoading, user, isGuest]);
+
+  const displayName = user?.profile?.fullName || (isGuest ? "الشيماء" : (user?.email?.split("@")[0] || "مستخدم"));
+  const avatarChar = isGuest
+    ? "ش"
+    : (computeAvatarInitial(user?.profile?.fullName, user?.email) || (displayName ? displayName.charAt(0) : "م"));
 
   const source = tab === "products" ? productsList : stockList;
   const metricsFn = tab === "products" ? productMetrics : stockMetrics;
@@ -258,6 +275,34 @@ export default function CatalogPage() {
   }));
 
   const slots = {
+    "mini-avatar": avatarChar,
+    "demo-label": isGuest ? "بيانات توضيحية" : "بيانات المنشأة",
+    "topbar-actions": (
+      <button
+        type="button"
+        className="icon-button"
+        onClick={logout}
+        title="تسجيل الخروج"
+        aria-label="تسجيل الخروج"
+        style={{
+          background: "transparent",
+          border: "1px solid #e2e8f0",
+          borderRadius: "6px",
+          padding: "4px 8px",
+          fontSize: "12px",
+          color: "#64748b",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          cursor: "pointer",
+        }}
+      >
+        <svg style={{ width: "14px", height: "14px" }}>
+          <use href="#logout" />
+        </svg>
+        <span>خروج</span>
+      </button>
+    ),
     "catalog-summary": summaries.map(([icon, title, value, note], i) => (
       <Summary
         key={title}
@@ -290,7 +335,7 @@ export default function CatalogPage() {
           </button>
         </>
       ) : null,
-    "period-footer": "نسخة تجريبية · " + months[month].name + " ٢٠٢٦",
+    "period-footer": (isGuest ? "نسخة تجريبية · " : "فترة ") + months[month].name + " ٢٠٢٦",
     "catalog-count":
       number(rows.length) + " من " + number(source.length) + " أصناف",
     "catalog-table": (

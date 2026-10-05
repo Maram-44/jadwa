@@ -21,19 +21,32 @@ import {
 } from "../../shared/lib/hooks.js";
 import { Icon, number } from "../../shared/ui/primitives.jsx";
 import Select from "../../shared/ui/Select.jsx";
+import { useAuth } from "../../shared/lib/authContext.jsx";
+import { computeAvatarInitial } from "../../shared/types/dto.js";
+
 const { schemas, fields } = HubData;
 export default function DataHubPage() {
+  const { user, loading: authLoading, logout } = useAuth();
+  const isGuest = user?.isGuest ?? false;
+
   const [params] = useQuery(),
     month = params.get("month") === "aug" ? "aug" : "sep",
     w = useWorkspace(month, "data-hub"),
     meetingFlow = params.get("return") === "meeting",
     loading = useLoading("hub", 250);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      location.replace("login.html");
+    }
+  }, [authLoading, user]);
+
   const [activePeriod, setPeriod] = useState(() =>
       /^\d{4}-(0[1-9]|1[0-2])$/.test(params.get("period") || "")
         ? params.get("period")
         : JadwaSession.periodFor(month),
     ),
-    [files, setFiles] = useState(() => JadwaSession.files()),
+    [files, setFiles] = useState(() => (isGuest ? JadwaSession.files() : [])),
     [draft, setDraft] = useState(null),
     [step, setStep] = useState(1),
     [type, setType] = useState("sales"),
@@ -61,12 +74,16 @@ export default function DataHubPage() {
     [],
   );
   useEffect(() => {
-    dataHubService.getFiles().then((loaded) => {
-      if (loaded && loaded.length > 0) {
-        setFiles(loaded);
-      }
+    if (authLoading || !user) return;
+    dataHubService.getFiles(null, isGuest).then((loaded) => {
+      setFiles(loaded || []);
     }).catch(() => {});
-  }, []);
+  }, [authLoading, user, isGuest]);
+
+  const displayName = user?.profile?.fullName || (isGuest ? "الشيماء" : (user?.email?.split("@")[0] || "مستخدم"));
+  const avatarChar = isGuest
+    ? "ش"
+    : (computeAvatarInitial(user?.profile?.fullName, user?.email) || (displayName ? displayName.charAt(0) : "م"));
   useEffect(() => {
     if (error) errorRef.current?.scrollIntoView({ block: "nearest" });
   }, [error]);
@@ -518,6 +535,35 @@ export default function DataHubPage() {
         }}
       />
     ),
+    "mini-avatar": avatarChar,
+    "demo-label": isGuest ? "بيانات توضيحية" : "بيانات المنشأة",
+    "topbar-actions": (
+      <button
+        type="button"
+        className="icon-button"
+        onClick={logout}
+        title="تسجيل الخروج"
+        aria-label="تسجيل الخروج"
+        style={{
+          background: "transparent",
+          border: "1px solid #e2e8f0",
+          borderRadius: "6px",
+          padding: "4px 8px",
+          fontSize: "12px",
+          color: "#64748b",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          cursor: "pointer",
+        }}
+      >
+        <svg style={{ width: "14px", height: "14px" }}>
+          <use href="#logout" />
+        </svg>
+        <span>خروج</span>
+      </button>
+    ),
+    "period-footer": (isGuest ? "نسخة تجريبية · " : "فترة ") + monthName(activePeriod) + " ٢٠٢٦",
     "hub-status": toast,
     "hub-toast": toast,
   };

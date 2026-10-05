@@ -6,42 +6,55 @@ import {
 } from "../../../shared/data/expenses.js";
 import { normalizeSearch } from "../../../shared/data/catalog.js";
 import { toExpenseDTO } from "../../../shared/types/dto.js";
+import { authService } from "../../auth/services/authService.js";
 
 export const expensesService = {
   /**
    * Get raw expense records for the period
    */
-  async getExpenseRecords(period = "sep") {
+  async getExpenseRecords(period = "sep", explicitIsGuest = null) {
     const periodKey = period === "aug" ? "2026-08" : "2026-09";
 
-    if (isSupabaseConfigured && supabase) {
+    let isGuest = explicitIsGuest;
+    if (isGuest === null) {
+      const user = await authService.getCurrentUser();
+      isGuest = Boolean(user && user.isGuest);
+    }
+
+    if (!isGuest && isSupabaseConfigured && supabase) {
       try {
         const { data, error } = await supabase
           .from("expenses")
           .select("*")
           .eq("period_key", periodKey);
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           return data.map(toExpenseDTO);
         }
+        return [];
       } catch (err) {
         console.warn("[Expenses Service] Error fetching expenses from Supabase:", err);
+        return [];
       }
     }
 
-    return fallbackRecords.map((r) => ({
-      id: r.id,
-      name: r.name,
-      category: r.category,
-      vendor: r.vendor,
-      recurring: r.recurring,
-      day: r.day,
-      amount: r[period] ?? 0,
-      date: `2026-${period === "aug" ? "08" : "09"}-${String(r.day).padStart(2, "0")}`,
-      opportunity: r.opportunity,
-      renewDay: r.renewDay || null,
-      description: r.description,
-    }));
+    if (isGuest) {
+      return fallbackRecords.map((r) => ({
+        id: r.id,
+        name: r.name,
+        category: r.category,
+        vendor: r.vendor,
+        recurring: r.recurring,
+        day: r.day,
+        amount: r[period] ?? 0,
+        date: `2026-${period === "aug" ? "08" : "09"}-${String(r.day).padStart(2, "0")}`,
+        opportunity: r.opportunity,
+        renewDay: r.renewDay || null,
+        description: r.description,
+      }));
+    }
+
+    return [];
   },
 
   /**
@@ -56,8 +69,9 @@ export const expensesService = {
       related = false,
       sort = "date-desc",
     } = {},
+    explicitIsGuest = null,
   ) {
-    const records = await this.getExpenseRecords(period);
+    const records = await this.getExpenseRecords(period, explicitIsGuest);
     const q = normalizeSearch(query);
 
     return records
@@ -86,9 +100,9 @@ export const expensesService = {
   /**
    * Get summary totals, recurring metrics, and category distributions
    */
-  async getExpenseSummary(period) {
-    const rows = await this.getExpenseRows(period);
-    const previous = period === "sep" ? await this.getExpenseRows("aug") : null;
+  async getExpenseSummary(period, explicitIsGuest = null) {
+    const rows = await this.getExpenseRows(period, {}, explicitIsGuest);
+    const previous = period === "sep" ? await this.getExpenseRows("aug", {}, explicitIsGuest) : null;
     const total = rows.reduce((s, r) => s + r.amount, 0);
 
     return {
